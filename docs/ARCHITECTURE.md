@@ -1,0 +1,113 @@
+# 架构设计文档
+
+创建日期：2026-05-30
+
+## 1. 总体架构分层
+
+### Layer 0：纯数据对象
+
+无任何依赖，仅定义结构体和枚举。
+
+| 模块 | 说明 |
+|------|------|
+| Detection | 目标检测结果结构体（bbox, label, confidence） |
+| ClassificationResult | 图像分类结果结构体 |
+| InferenceConfig | 推理配置结构体 |
+
+**依赖方向**：无外部依赖，被所有上层模块使用。
+
+### Layer 1-2：工具类与配置
+
+| 层级 | 模块 | 说明 |
+|------|------|------|
+| Layer 1 | Logger | 日志工具类 |
+| Layer 1 | Timer | 性能测量工具类 |
+| Layer 2 | Preprocessor | 图像预处理（resize、归一化、letterbox、BGR/RGB 转换） |
+
+**依赖方向**：Layer 1 → Layer 0；Layer 2 → Layer 1（使用 Logger/Timer）→ Layer 0
+
+### Layer 3：核心业务逻辑
+
+| 模块 | 说明 |
+|------|------|
+| InferenceBackend | 纯虚基类，定义推理后端抽象接口 |
+| OnnxRuntimeBackend | ONNX Runtime 后端实现 |
+| NcnnBackend | NCNN 后端实现 |
+| ObjectDetector | 组合后端 + 后处理的目标检测器 |
+| LlamaGenerator | LLM 文本生成模块 |
+
+**依赖方向**：Layer 3 → Layer 2 → Layer 1 → Layer 0
+
+### Layer 4：控制器与接口
+
+| 模块 | 说明 |
+|------|------|
+| RestServer | HTTP REST API 服务 |
+| CLI Entry | 命令行入口 |
+
+**依赖方向**：Layer 4 → Layer 3 → Layer 2 → Layer 1 → Layer 0
+
+## 2. 模块依赖关系图
+
+```
+M9 (REST API) ──→ M3 (ONNX Runtime Backend) ──→ M2 (InferenceBackend 抽象接口)
+                ──→ M6 (ObjectDetector) ──→ M2 (InferenceBackend 抽象接口)
+                                        ──→ M5 (YOLO 后处理) ──→ M1 (预处理)
+M6 (ObjectDetector) ──→ M5 ──→ M1
+M7 (LLM 文本生成) — 独立模块，依赖 Llama.cpp
+M8 (批量预处理流水线) ──→ M1 (预处理)
+```
+
+## 3. 关键接口定义
+
+### InferenceBackend 抽象类
+
+```cpp
+class InferenceBackend {
+public:
+    virtual ~InferenceBackend() = default;
+    virtual bool LoadModel(const std::string& model_path, const InferenceConfig& config) = 0;
+    virtual bool Predict(const std::vector<float>& input, std::vector<float>& output) = 0;
+    virtual std::vector<InputShape> GetInputShapes() const = 0;
+};
+```
+
+### ObjectDetector 类
+
+```cpp
+class ObjectDetector {
+public:
+    bool Init(const std::string& model_path, const InferenceConfig& config);
+    std::vector<Detection> Detect(const cv::Mat& image);
+};
+```
+
+### LlamaGenerator 类
+
+```cpp
+class LlamaGenerator {
+public:
+    bool Load(const std::string& model_path);
+    std::string Generate(const std::string& prompt, std::function<void(const std::string&)> callback = nullptr);
+};
+```
+
+## 4. 设计决策记录
+
+| 决策 | 原因 | 状态 |
+|------|------|------|
+| 为什么选择 ONNX Runtime 而非 LibTorch？ | [待补充] | 待完善 |
+| 为什么预处理输出 CHW 顺序的 float 数组？ | [待补充] | 待完善 |
+| 为什么 NMS 放在后处理单独模块？ | [待补充] | 待完善 |
+
+## 5. 性能优化方向
+
+| 方向 | 说明 | 状态 |
+|------|------|------|
+| int8 量化 | [待补充] | 待完善 |
+| 多线程预处理流水线 | [待补充] | 待完善 |
+| Winograd 卷积加速（NCNN） | [待补充] | 待完善 |
+
+## 6. 已知限制与未来扩展
+
+[待补充]
