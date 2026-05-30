@@ -5,7 +5,7 @@
 > 代码行数仅为大致参考，可根据实际需求适当调整，以优先完成项目功能和可扩展性为第一优先级。
 
 - [x] M0. 项目骨架 — 200行 — 无依赖 — 创建 CMakeLists.txt、目录结构、Logger 工具类、Timer 性能测量类
-- [ ] M1. 图像预处理库 — 600行 — 依赖 OpenCV — 实现图像读取、resize、归一化、letterbox、BGR/RGB 转换，输出 CHW 顺序的 float 数组
+- [x] M1. 图像预处理库 — 600行 — 依赖 OpenCV — 实现图像读取、resize、归一化、letterbox、BGR/RGB 转换，输出 CHW 顺序的 float 数组
 - [ ] M2. 推理后端抽象接口 — 150行 — 无依赖 — 定义纯虚基类 InferenceBackend，包含 LoadModel、Predict、GetInputShapes 方法
 - [ ] M3. ONNX Runtime 后端 — 500行 — 依赖 M2, ONNX Runtime — 实现 InferenceBackend 接口，封装 ONNX Runtime 推理，支持动态输入形状和 int8 量化选项
 - [ ] M4. NCNN 后端 — 500行 — 依赖 M2, NCNN — 实现 InferenceBackend 接口，封装 NCNN 推理，开启 fp16 和 Winograd 优化
