@@ -17,16 +17,36 @@ Inference-Service/
 ├── include/          # 公共头文件
 ├── src/              # 源文件
 │   ├── utils/        # 工具类（Logger、Timer）
+│   ├── preprocess/   # 图像预处理（ResizeAndNorm、Letterbox）
 │   └── main.cpp      # 主入口
 ├── docs/             # 项目文档
+├── build.sh          # 全量重建脚本
+├── rebuild.sh        # 增量编译脚本
 ├── CMakeLists.txt    # CMake 构建配置
 └── README.md
 ```
 
+## 依赖安装
+
+macOS: `brew install opencv`
+Ubuntu: `sudo apt install libopencv-dev`
+Windows: `vcpkg install opencv`
+
 ## 编译与运行
 
+### 方式一：使用构建脚本（推荐）
+
 ```bash
-cd Inference-Service
+# 全量重建（清理 build 目录后重新编译运行）
+./build.sh
+
+# 增量编译（保留 build 缓存，速度更快）
+./rebuild.sh
+```
+
+### 方式二：手动编译
+
+```bash
 mkdir build && cd build
 cmake ..
 make
