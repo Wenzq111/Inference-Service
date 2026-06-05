@@ -37,6 +37,7 @@ public:
 
     // 获取模型所有输出张量的形状
     // 返回: 每个输出张量的形状，例如 {{1,1000}} 表示一个 batch=1、1000类别的输出
+    //       返回顺序与 GetOutputNames() 一致
     virtual std::vector<std::vector<int64_t>> GetOutputShapes() const = 0;
 
     // 虚析构函数，确保派生类对象通过基类指针删除时正确释放资源
