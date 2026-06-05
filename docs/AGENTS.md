@@ -23,8 +23,8 @@ Inference-Service/
 ├── src/                  # 源文件
 │   ├── main.cpp          # 主入口
 │   ├── utils/            # 工具类实现
-│   │   ├── logger.cpp
-│   │   └── timer.cpp
+│   │   ├── logger.cpp    # Logger 实现，带时间戳和级别前缀的分级日志输出
+│   │   └── timer.cpp     # Timer 实现，基于 steady_clock 的高精度计时
 │   ├── preprocess/       # 图像预处理实现
 │   │   └── preprocess.cpp    # ResizeAndNorm、Letterbox 实现
 │   ├── backend/          # 推理后端实现（待开发）
