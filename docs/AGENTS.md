@@ -16,16 +16,17 @@
 ```
 Inference-Service/
 ├── include/              # 公共头文件
-│   ├── logger.h          # Logger 工具类
-│   ├── timer.h           # Timer 性能测量类
-│   └── preprocess.h      # 图像预处理函数声明
+│   ├── logger.h              # Logger 工具类
+│   ├── timer.h               # Timer 性能测量类
+│   ├── preprocess.h          # 图像预处理函数声明
+│   └── inference_backend.h   # 推理后端抽象接口
 ├── src/                  # 源文件
 │   ├── main.cpp          # 主入口
 │   ├── utils/            # 工具类实现
 │   │   ├── logger.cpp
 │   │   └── timer.cpp
 │   ├── preprocess/       # 图像预处理实现
-│   │   └── preprocess.cpp
+│   │   └── preprocess.cpp    # ResizeAndNorm、Letterbox 实现
 │   ├── backend/          # 推理后端实现（待开发）
 │   ├── postprocess/      # 后处理实现（待开发）
 │   ├── detector/         # 目标检测器（待开发）
