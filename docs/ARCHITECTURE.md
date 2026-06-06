@@ -96,9 +96,12 @@ public:
 
 | 决策 | 原因 | 状态 |
 |------|------|------|
-| 为什么选择 ONNX Runtime 而非 LibTorch？ | [待补充] | 待完善 |
-| 为什么预处理输出 CHW 顺序的 float 数组？ | [待补充] | 待完善 |
-| 为什么 NMS 放在后处理单独模块？ | [待补充] | 待完善 |
+| 为什么选择 ONNX Runtime 而非 LibTorch？ | ONNX Runtime 专注推理而非训练，体积更小、部署更轻量；支持多框架模型转换（PyTorch→ONNX、TF→ONNX）；CPU 推理性能优于 LibTorch；提供 int8 量化能力；无需 Python 依赖链 | 已完善 |
+| 为什么预处理输出 CHW 顺序的 float 数组？ | ONNX Runtime 和 NCNN 均要求 CHW 输入格式；CHW 使每个通道数据连续排列，利于 CPU/GPU 向量化运算和缓存命中；与训练框架（PyTorch）的数据布局一致，避免推理时额外转换 | 已完善 |
+| 为什么 NMS 放在后处理单独模块？ | NMS 是通用算法，与具体推理后端无关，独立模块可被不同检测器复用；不同检测任务可能需要不同 NMS 参数，独立模块便于参数化配置；便于单独测试和优化 NMS 性能 | 已完善 |
+| 为什么 Logger 使用静态方法而非单例？ | Logger 无状态依赖，静态方法更简洁，避免单例的线程安全和生命周期管理问题 | 已完善 |
+| 预处理函数为什么要加 target_w/target_h 边界检查？ | OpenCV 的 resize 对非法尺寸会产生未定义行为或崩溃，防御性检查避免下游错误 | 已完善 |
+| InferenceBackend 接口中为何增加 GetInputNames/GetOutputNames？ | ONNX Runtime 和 NCNN 都依赖输入/输出节点名称来绑定数据，后端实现必须暴露这些名称供上层调用 | 已完善 |
 
 ## 5. 性能优化方向
 
