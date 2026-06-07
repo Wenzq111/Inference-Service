@@ -6,26 +6,46 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs)
 
-# 查找 onnxruntime：优先使用 CMake imported target，失败则手动搜索 Homebrew 路径
+# 查找 onnxruntime：优先 CMake config，失败则手动搜索
 find_package(onnxruntime QUIET)
 if(onnxruntime_FOUND)
-    # imported target onnxruntime::onnxruntime 自动提供 include 和 lib
     set(ORT_LINK_TARGET onnxruntime::onnxruntime)
     message(STATUS "onnxruntime found via CMake config")
 else()
+    # 支持用户通过 -DONNXRUNTIME_ROOT=... 或环境变量指定安装根目录
+    if(NOT ONNXRUNTIME_ROOT)
+        set(ONNXRUNTIME_ROOT $ENV{ONNXRUNTIME_ROOT})
+    endif()
+
+    # 搜索路径：用户指定 > Homebrew > 系统标准路径
+    set(_ORT_SEARCH_PATHS
+        ${ONNXRUNTIME_ROOT}
+        ${ONNXRUNTIME_ROOT}/include
+        /opt/homebrew
+        /usr/local
+        /usr
+    )
+
     find_path(ONNXRUNTIME_INCLUDE_DIR
         NAMES onnxruntime_cxx_api.h
-        PATHS /opt/homebrew/include/onnxruntime
-              /usr/local/include/onnxruntime)
+        PATHS ${_ORT_SEARCH_PATHS}
+        PATH_SUFFIXES include/onnxruntime include)
+
     find_library(ONNXRUNTIME_LIB
-        NAMES onnxruntime
-        PATHS /opt/homebrew/lib
-              /usr/local/lib)
+        NAMES onnxruntime onnxruntime.lib
+        PATHS ${_ORT_SEARCH_PATHS}
+        PATH_SUFFIXES lib lib64)
+
     if(ONNXRUNTIME_INCLUDE_DIR AND ONNXRUNTIME_LIB)
         set(ORT_LINK_TARGET ${ONNXRUNTIME_LIB})
-        message(STATUS "onnxruntime found manually: ${ONNXRUNTIME_LIB}")
+        message(STATUS "onnxruntime found: include=${ONNXRUNTIME_INCLUDE_DIR}, lib=${ONNXRUNTIME_LIB}")
     else()
-        message(FATAL_ERROR "onnxruntime not found. Install via: brew install onnxruntime")
+        message(FATAL_ERROR
+            "onnxruntime not found.\n"
+            "Options:\n"
+            "  1. Install via package manager (brew install onnxruntime / vcpkg install onnxruntime)\n"
+            "  2. Specify path: cmake -DONNXRUNTIME_ROOT=/path/to/onnxruntime ..\n"
+            "  3. Set environment variable: export ONNXRUNTIME_ROOT=/path/to/onnxruntime")
     endif()
 endif()
 
