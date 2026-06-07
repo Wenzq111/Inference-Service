@@ -1,12 +1,14 @@
 #include "logger.h"
 #include "timer.h"
+#include "onnx_backend.h"
 
+#include <memory>
 #include <thread>
 #include <chrono>
 
 using namespace inference;
 
-// 程序入口，演示 Logger 和 Timer 功能
+// 程序入口，演示 Logger、Timer 和 OnnxBackend 功能
 int main() {
     // 设置日志过滤级别为 Debug，确保所有级别日志均可输出
     Logger::SetLevel(LogLevel::Debug);
@@ -23,6 +25,10 @@ int main() {
     timer.Stop();
 
     Logger::Info("Timer elapsed: " + std::to_string(timer.ElapsedMilliseconds()) + " ms");
+
+    // 演示 ONNX Runtime 后端创建
+    auto backend = std::make_unique<OnnxBackend>();
+    Logger::Info("ONNX Runtime backend created successfully");
 
     return 0;
 }

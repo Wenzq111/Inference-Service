@@ -1,12 +1,13 @@
 # 项目交接文档 (HANDOVER.md)
 
 创建日期：2026-05-30
+最后更新：2026-06-07
 
 ## 项目整体状态
 
-- 已完成模块：M0（项目骨架）、M1（图像预处理）、M2（推理后端抽象接口）
-- 代码量估算：约 400 行（不含注释和文档）
-- 当前可编译运行，输出 Logger 和 Timer 演示日志
+- 已完成模块：M0（项目骨架）、M1（图像预处理）、M2（推理后端抽象接口）、M3（ONNX Runtime 后端）
+- 代码量估算：约 600 行（不含注释和文档）
+- 当前可编译运行，输出 Logger、Timer 和 OnnxBackend 创建演示日志
 
 ## 目录结构
 
@@ -16,7 +17,8 @@ Inference-Service/
 │   ├── logger.h
 │   ├── timer.h
 │   ├── preprocess.h
-│   └── inference_backend.h
+│   ├── inference_backend.h
+│   └── onnx_backend.h
 ├── src/
 │   ├── main.cpp
 │   ├── utils/
@@ -24,7 +26,8 @@ Inference-Service/
 │   │   └── timer.cpp
 │   ├── preprocess/
 │   │   └── preprocess.cpp
-│   ├── backend/          （待开发）
+│   ├── backend/
+│   │   └── onnx_backend.cpp
 │   ├── postprocess/      （待开发）
 │   ├── detector/         （待开发）
 │   ├── llm/              （待开发）
@@ -50,17 +53,19 @@ Inference-Service/
 | `include/timer.h` | M0 | Timer 类声明 |
 | `include/preprocess.h` | M1 | ResizeAndNorm、Letterbox 函数声明 |
 | `include/inference_backend.h` | M2 | InferenceBackend 纯虚基类声明 |
+| `include/onnx_backend.h` | M3 | OnnxBackend 类声明（PImpl 模式） |
 | `src/utils/logger.cpp` | M0 | Logger 实现（时间戳+级别前缀） |
 | `src/utils/timer.cpp` | M0 | Timer 实现（steady_clock） |
 | `src/preprocess/preprocess.cpp` | M1 | ResizeAndNorm、Letterbox 实现 |
-| `src/main.cpp` | M0 | 主入口（Logger+Timer 演示） |
+| `src/backend/onnx_backend.cpp` | M3 | OnnxBackend 实现（PImpl，Ort::Session 封装） |
+| `src/main.cpp` | M0+M3 | 主入口（Logger+Timer+OnnxBackend 演示） |
 
 ## 依赖项
 
 | 依赖 | 版本 | 状态 |
 |------|------|------|
 | OpenCV | 4.13.0 (Homebrew) | ✅ 已安装并链接（core, imgproc, imgcodecs） |
-| onnxruntime | >=1.15.0 | ❌ 待安装（M3 需要） |
+| onnxruntime | 1.26.0 (Homebrew) | ✅ 已安装并链接（via CMake imported target） |
 | ncnn | 最新版 | ❌ 待安装（M4 需要） |
 | Llama.cpp | - | ❌ 待安装（M7 需要） |
 | cpp-httplib | - | ❌ 待安装（M9 需要） |
@@ -85,7 +90,7 @@ make
 
 ## 未完成任务清单
 
-- [ ] M3. ONNX Runtime 后端 — 依赖 M2, ONNX Runtime
+- [x] M3. ONNX Runtime 后端 — 依赖 M2, ONNX Runtime ✅ 已完成
 - [ ] M4. NCNN 后端 — 依赖 M2, NCNN
 - [ ] M5. YOLO 后处理 — 依赖 M1
 - [ ] M6. 目标检测器 — 依赖 M2, M5
@@ -98,9 +103,9 @@ make
 ## 编码约定
 
 - 命名空间：`inference`
-- 类名：PascalCase（如 `Logger`, `Timer`, `InferenceBackend`）
+- 类名：PascalCase（如 `Logger`, `Timer`, `InferenceBackend`, `OnnxBackend`）
 - 函数名：PascalCase（如 `ResizeAndNorm`, `LoadModel`, `GetInputShapes`）
-- 成员变量：snake_case 带下划线后缀（如 `level_`, `running_`, `start_time_`）
+- 成员变量：snake_case 带下划线后缀（如 `level_`, `running_`, `start_time_`, `impl_`）
 - 枚举：PascalCase（如 `LogLevel::Debug`）
 - 注释：`//` 单行注释，每个函数/类/结构体必须有注释
 - 代码风格：Google C++ Style Guide
@@ -115,9 +120,10 @@ make
 | Logger 未支持文件输出 | 日志只能输出到 stdout | 后续添加 FileLogger 或可配置输出目标 |
 | InferenceBackend 使用 vector<vector<float>> | 批量推理时内存拷贝开销大 | 改用连续内存 + 形状信息方案 |
 | Timer 不支持多次分段计时 | 只能测量单段耗时 | 扩展 LapTimer 支持多段计时 |
+| OnnxBackend Predict 拷贝输入数据 | CreateTensor 要求非 const 指针，需额外拷贝 | 改用 Ort::Value::CreateTensor 分配器模式，避免用户数据拷贝 |
 
 ## 下一步行动建议
 
-1. **实现 M3：ONNX Runtime 后端** — 继承 InferenceBackend，封装 ONNX Runtime 推理
-2. 安装 onnxruntime 库并添加到 CMakeLists.txt
+1. **实现 M4：NCNN 后端** — 继承 InferenceBackend，封装 NCNN 推理，同样使用 PImpl 模式
+2. 安装 ncnn 库并添加到 CMakeLists.txt
 3. 实现后更新 TASKS.md 和 HANDOVER.md
