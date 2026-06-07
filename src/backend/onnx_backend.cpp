@@ -11,20 +11,33 @@ namespace inference {
 
 // PImpl 内部结构，持有所有 ONNX Runtime 相关对象和缓存元信息
 struct OnnxBackend::Impl {
+    // ONNX Runtime 运行环境，全局唯一，管理日志输出和会话生命周期，构造时指定日志级别为 Warning
     Ort::Env env;
+    // 会话配置选项，控制线程数、图优化级别等运行参数，构造时设置单线程和全级别优化
     Ort::SessionOptions session_options;
+    // ONNX Runtime 推理会话，LoadModel 时创建，持有模型权重和执行图，RAII 管理资源释放
     std::unique_ptr<Ort::Session> session;
 
+    // 模型输入节点名称列表，LoadModel 时从 session 提取，与 input_name_ptrs 和 input_shapes 顺序一致
     std::vector<std::string> input_names;
+    // 模型输出节点名称列表，LoadModel 时从 session 提取，与 output_name_ptrs 和 output_shapes 顺序一致
     std::vector<std::string> output_names;
+    // 模型输入张量形状列表，每个元素是一个维度向量如 {1,3,224,224}，动态维度用 -1 表示
     std::vector<std::vector<int64_t>> input_shapes;
+    // 模型输出张量形状列表，每个元素是一个维度向量如 {1,1000}，动态维度用 -1 表示
     std::vector<std::vector<int64_t>> output_shapes;
 
+    // 输入节点名称的 C 字符串指针列表，指向 input_names 中的 string 内部缓冲区，供 session.Run() 使用
     std::vector<const char*> input_name_ptrs;
+    // 输出节点名称的 C 字符串指针列表，指向 output_names 中的 string 内部缓冲区，供 session.Run() 使用
     std::vector<const char*> output_name_ptrs;
 
+    // 标记模型是否已成功加载，Predict 等方法的前置条件，LoadModel 成功后置为 true
     bool model_loaded = false;
 
+    // 初始化 ONNX Runtime 环境和会话选项
+    // env: 日志级别为 Warning，仅输出警告和错误信息
+    // session_options: IntraOp 线程数设为 1（单线程推理），图优化级别设为 ORT_ENABLE_ALL（启用所有可用优化）
     Impl()
         : env(ORT_LOGGING_LEVEL_WARNING, "inference") {
         session_options.SetIntraOpNumThreads(1);
@@ -32,7 +45,13 @@ struct OnnxBackend::Impl {
             GraphOptimizationLevel::ORT_ENABLE_ALL);
     }
 
-    // 从已加载的 session 中提取输入/输出名称和形状
+    // 从已加载的 Ort::Session 中提取并缓存模型元信息
+    // 使用 Ort::AllocatorWithDefaultOptions 分配器获取节点名称
+    // 遍历所有输入/输出节点，依次提取：
+    //   1. 节点名称（AllocatedStringPtr 转 std::string）
+    //   2. 名称对应的 C 字符串指针（指向 string 内部缓冲区，须在 string 生命周期内使用）
+    //   3. 节点的 TensorTypeInfo 中的形状信息（含动态维度 -1）
+    // 提取后清空旧缓存，保证 LoadModel 多次调用时数据一致性
     void ExtractModelInfo() {
         Ort::AllocatorWithDefaultOptions allocator;
 
@@ -64,11 +83,23 @@ struct OnnxBackend::Impl {
     }
 };
 
+// 构造 OnnxBackend 对象，创建 Impl 实例初始化 ONNX Runtime 环境
+// 此时模型尚未加载，需后续调用 LoadModel 加载具体模型
 OnnxBackend::OnnxBackend()
     : impl_(std::make_unique<Impl>()) {}
 
+// 析构函数，由 unique_ptr<Impl> 自动释放 ONNX Runtime 资源
+// Impl 内的 Ort::Session、Ort::Env 等均为 RAII 对象，无需手动清理
 OnnxBackend::~OnnxBackend() = default;
 
+// 加载 ONNX 模型文件并初始化推理会话
+// model_path: 模型文件路径（.onnx 格式）
+// 流程：
+//   1. 检查模型文件是否存在，不存在则返回 false
+//   2. 创建 Ort::Session 并加载模型，提取输入/输出元信息
+//   3. 构建包含输入/输出名称和形状的详细日志
+// 异常处理：捕获 Ort::Exception 和 std::exception，转为 Logger::Error 并返回 false
+// 返回: 加载成功返回 true，文件不存在或 ONNX Runtime 异常返回 false
 bool OnnxBackend::LoadModel(const std::string& model_path) {
     if (!std::filesystem::exists(model_path)) {
         Logger::Error("OnnxBackend::LoadModel: model file not found: " + model_path);
@@ -121,6 +152,19 @@ bool OnnxBackend::LoadModel(const std::string& model_path) {
     return true;
 }
 
+// 执行推理，将预处理后的数据送入模型并获取输出
+// inputs: 输入张量列表，每个元素是一个 flatten 为一维的 float 数组（CHW 顺序）
+//         数量必须与模型输入节点数量一致
+// 流程：
+//   1. 前置检查：模型已加载、inputs 不为空、输入数量匹配
+//   2. 动态形状解析：将 -1 维度替换为实际值，校验数据大小与形状整除一致性
+//   3. 创建 Ort::Value 输入张量（使用 const_cast 避免数据拷贝）
+//   4. 调用 session.Run() 执行推理
+//   5. 从输出 Ort::Value 中拷贝数据到 vector<float>
+//   6. Timer 记录推理耗时并输出日志
+// 异常处理：捕获 Ort::Exception 和 std::exception，转为 Logger::Error 并返回空 vector
+// 返回: 推理成功返回输出张量列表，每个输出为 flatten 的一维 float 数组；
+//       前置检查失败或推理异常返回空 vector
 std::vector<std::vector<float>> OnnxBackend::Predict(
     const std::vector<std::vector<float>>& inputs) {
     if (!impl_->model_loaded) {
@@ -214,18 +258,22 @@ std::vector<std::vector<float>> OnnxBackend::Predict(
     }
 }
 
+// 返回模型输入张量形状列表，顺序与 GetInputNames() 一致
 std::vector<std::vector<int64_t>> OnnxBackend::GetInputShapes() const {
     return impl_->input_shapes;
 }
 
+// 返回模型输入节点名称列表，顺序与 GetInputShapes() 一致
 std::vector<std::string> OnnxBackend::GetInputNames() const {
     return impl_->input_names;
 }
 
+// 返回模型输出节点名称列表，顺序与 GetOutputShapes() 一致
 std::vector<std::string> OnnxBackend::GetOutputNames() const {
     return impl_->output_names;
 }
 
+// 返回模型输出张量形状列表，顺序与 GetOutputNames() 一致
 std::vector<std::vector<int64_t>> OnnxBackend::GetOutputShapes() const {
     return impl_->output_shapes;
 }
