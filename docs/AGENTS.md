@@ -7,7 +7,7 @@
 - **语言标准**：C++17
 - **构建系统**：CMake 3.15+
 - **代码风格**：Google C++ Style Guide
-- **核心依赖**：OpenCV 4.x (core, imgproc, imgcodecs)、onnxruntime (>=1.15.0)、ncnn（最新版）
+- **核心依赖**：OpenCV 4.x (core, imgproc, imgcodecs)、onnxruntime (>=1.20.0)、ncnn（最新版）
 - **平台兼容性**：项目代码必须兼容 macOS（Apple Silicon M 系列）和 Linux（Ubuntu 20.04+），架构设计须保持可扩展性以便未来兼容更多平台（如 Windows、Android）。所有平台相关代码须通过条件编译（`#if defined(...)）隔离，不得硬编码平台路径或依赖。
 - **构建脚本**：`build.sh`（全量重建）、`rebuild.sh`（增量编译）
 
