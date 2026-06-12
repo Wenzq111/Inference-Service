@@ -191,17 +191,19 @@ bool OnnxBackend::LoadModel(const std::string& model_path) {
 //       前置检查失败或推理异常返回空 vector
 std::vector<std::vector<float>> OnnxBackend::Predict(
     const std::vector<std::vector<float>>& inputs) {
+    // 前置检查1：模型必须已通过 LoadModel 加载，否则 Predict 无法构造输入张量和调用 session.Run()
+    // 前置检查1：模型必须已通过 LoadModel 加载，否则无法构造输入张量和调用 session.Run()
     if (!impl_->model_loaded) {
         Logger::Error("OnnxBackend::Predict: model not loaded");
         return {};
     }
-
+    // 前置检查2：inputs 不能为空，空输入无法构造 Ort::Value 张量
     if (inputs.empty()) {
         Logger::Error("OnnxBackend::Predict: inputs is empty");
         return {};
     }
-
-    // 检查输入数量与模型输入数量一致
+    // 前置检查3：输入数量必须与模型输入节点数量一致
+    // ONNX Runtime 要求每个输入节点都有对应数据，多余或不足都会导致 Run() 失败
     if (inputs.size() != impl_->input_shapes.size()) {
         Logger::Error("OnnxBackend::Predict: input count mismatch, expected "
                       + std::to_string(impl_->input_shapes.size())
@@ -213,14 +215,24 @@ std::vector<std::vector<float>> OnnxBackend::Predict(
     timer.Start();
 
     try {
+        // ---- 推理核心流程开始 ----
+        // 步骤1：创建 CPU 内存信息对象
+        // OrtArenaAllocator 使用 ONNX Runtime 内部内存池（arena），分配效率高于直接 malloc
+        // OrtMemTypeDefault 表示使用默认内存类型（非 GPU、非 pinned）
+        // 该 memory_info 将用于所有输入张量的数据绑定
         Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(
             OrtAllocatorType::OrtArenaAllocator,
             OrtMemType::OrtMemTypeDefault);
 
+        // 步骤2：为每个模型输入创建 Ort::Value 张量对象
         std::vector<Ort::Value> input_tensors;
+        // 遍历每个输入，将 flatten 的 float 数组包装为 ONNX Runtime 可识别的张量
         for (size_t i = 0; i < inputs.size(); ++i) {
             auto& shape = impl_->input_shapes[i];
             // 将 shape 中 -1（动态维度）替换为实际值
+            // ONNX 模型的输入形状可能包含 -1（如 {−1,3,224,224} 表示 batch_size 动态），实际推理时需根据输入数据大小推断具体值
+            // remaining 从总元素数开始，逐维除以已知维度，遇到 -1 时将该维度设为 remaining 并将 remaining 重置为 1
+            // 最终 remaining 应等于 1 表示数据量与形状完全匹配
             std::vector<int64_t> actual_shape = shape;
             int64_t remaining = static_cast<int64_t>(inputs[i].size());
             for (auto& dim : actual_shape) {
@@ -241,7 +253,9 @@ std::vector<std::vector<float>> OnnxBackend::Predict(
                 return {};
             }
 
-            // ONNX Runtime 不会修改输入数据，使用 const_cast 避免拷贝
+            // ONNX Runtime 的 CreateTensor 要求 T*（非 const）指针，但 Run() 实际不会修改输入数据
+            // 使用 const_cast 去除 const 限制，直接引用 inputs 中的数据，避免整个输入向量的深拷贝
+            // 这是安全的：ONNX Runtime 只读取输入张量数据用于推理计算
             input_tensors.emplace_back(Ort::Value::CreateTensor<float>(
                 memory_info,
                 const_cast<float*>(inputs[i].data()),
@@ -249,6 +263,17 @@ std::vector<std::vector<float>> OnnxBackend::Predict(
                 actual_shape.data(), actual_shape.size()));
         }
 
+        // 步骤3：执行推理
+        // session.Run() 是 ONNX Runtime 的核心推理调用，参数含义：
+        //   - Ort::RunOptions{nullptr}: 使用默认运行选项（无日志输出、无超时限制）
+        //   - input_name_ptrs: 输入节点名称的 C 字符串指针数组，告诉 ONNX Runtime 每个输入张量对应哪个输入节点
+        //   - input_tensors: 输入张量数组，与 input_name_ptrs 顺序一一对应
+        //   - input_tensors.size(): 输入张量数量
+        //   - output_name_ptrs: 输出节点名称数组，指定需要获取哪些输出节点的结果
+        //   - output_name_ptrs.size(): 输出节点数量
+        // Run() 内部执行流程：将输入数据送入模型执行图 → 各算子依次计算 → 将结果写入输出张量
+        // 在 Apple Silicon 上，如果 CoreML EP 已注册，ONNX Runtime 会将兼容的算子调度到 CoreML（ANE/GPU/CPU），
+        // 不兼容的算子自动回退到 CPU EP，用户无需手动处理
         auto output_tensors = impl_->session->Run(
             Ort::RunOptions{nullptr},
             impl_->input_name_ptrs.data(),
@@ -257,10 +282,19 @@ std::vector<std::vector<float>> OnnxBackend::Predict(
             impl_->output_name_ptrs.data(),
             impl_->output_name_ptrs.size());
 
+        // 步骤4：记录推理耗时
+        // Timer 基于 steady_clock 测量从 Start 到 Stop 的时间间隔
+        // 该耗时包含张量创建、session.Run() 执行和数据拷贝的总时间
         timer.Stop();
         Logger::Info("OnnxBackend::Predict: inference completed in "
                      + std::to_string(timer.ElapsedMilliseconds()) + " ms");
 
+        // 步骤5：从输出 Ort::Value 张量中提取推理结果数据
+        // output_tensors 中的每个 Ort::Value 包含一个输出张量，数据存储在 ONNX Runtime 内部缓冲区
+        // GetTensorData<float>() 返回指向内部缓冲区的 const float* 指针
+        // GetTensorTypeAndShapeInfo().GetElementCount() 返回张量中总元素个数
+        // 使用指针范围构造 vector<float> 将数据从 ONNX Runtime 缓冲区拷贝到用户拥有的 vector 中
+        // 此拷贝不可避免：ONNX Runtime 的内部缓冲区在 session 生命周期内有效，用户需自行持有结果数据
         std::vector<std::vector<float>> results;
         for (size_t i = 0; i < output_tensors.size(); ++i) {
             auto& tensor = output_tensors[i];
@@ -270,13 +304,18 @@ std::vector<std::vector<float>> OnnxBackend::Predict(
             results.emplace_back(data, data + element_count);
         }
 
+        // 返回推理结果，每个输出张量已 flatten 为一维 float 数组
+        // 调用方可通过 GetOutputShapes() 获取形状信息来解析多维数据
         return results;
 
     } catch (const Ort::Exception& e) {
+        // 捕获 ONNX Runtime 特有异常：包括模型执行错误、张量类型不匹配、EP 调度失败等
+        // Ort::Exception 包含 ONNX 错误码和详细描述
         Logger::Error("OnnxBackend::Predict: ONNX Runtime error: " +
                       std::string(e.what()));
         return {};
     } catch (const std::exception& e) {
+        // 捕获通用异常：兜底处理非 ONNX Runtime 的异常（如内存分配失败、标准库错误等）
         Logger::Error("OnnxBackend::Predict: error: " + std::string(e.what()));
         return {};
     }
