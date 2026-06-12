@@ -1,6 +1,7 @@
 #include "logger.h"
 #include "timer.h"
 #include "onnx_backend.h"
+#include "ncnn_backend.h"
 
 #include <memory>
 #include <thread>
@@ -8,7 +9,7 @@
 
 using namespace inference;
 
-// 程序入口，演示 Logger、Timer 和 OnnxBackend 功能
+// 程序入口，演示 Logger、Timer、OnnxBackend 和 NcnnBackend 功能
 int main() {
     // 设置日志过滤级别为 Debug，确保所有级别日志均可输出
     Logger::SetLevel(LogLevel::Debug);
@@ -27,8 +28,12 @@ int main() {
     Logger::Info("Timer elapsed: " + std::to_string(timer.ElapsedMilliseconds()) + " ms");
 
     // 演示 ONNX Runtime 后端创建
-    auto backend = std::make_unique<OnnxBackend>();
+    auto onnx_backend = std::make_unique<OnnxBackend>();
     Logger::Info("ONNX Runtime backend created successfully");
+
+    // 演示 NCNN 后端创建
+    auto ncnn_backend = std::make_unique<NcnnBackend>();
+    Logger::Info("NCNN backend created successfully");
 
     return 0;
 }

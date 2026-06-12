@@ -5,9 +5,9 @@
 
 ## 项目整体状态
 
-- 已完成模块：M0（项目骨架）、M1（图像预处理）、M2（推理后端抽象接口）、M3（ONNX Runtime 后端）
-- 代码量估算：约 600 行（不含注释和文档）
-- 当前可编译运行，输出 Logger、Timer 和 OnnxBackend 创建演示日志
+- 已完成模块：M0（项目骨架）、M1（图像预处理）、M2（推理后端抽象接口）、M3（ONNX Runtime 后端）、M4（NCNN 后端）
+- 代码量估算：约 1100 行（不含注释和文档）
+- 当前可编译运行，输出 Logger、Timer、OnnxBackend 和 NcnnBackend 创建演示日志
 
 ## 目录结构
 
@@ -18,7 +18,8 @@ Inference-Service/
 │   ├── timer.h
 │   ├── preprocess.h
 │   ├── inference_backend.h
-│   └── onnx_backend.h
+│   ├── onnx_backend.h
+│   └── ncnn_backend.h
 ├── src/
 │   ├── main.cpp
 │   ├── utils/
@@ -27,7 +28,8 @@ Inference-Service/
 │   ├── preprocess/
 │   │   └── preprocess.cpp
 │   ├── backend/
-│   │   └── onnx_backend.cpp
+│   │   ├── onnx_backend.cpp
+│   │   └── ncnn_backend.cpp
 │   ├── postprocess/      （待开发）
 │   ├── detector/         （待开发）
 │   ├── llm/              （待开发）
@@ -54,11 +56,13 @@ Inference-Service/
 | `include/preprocess.h` | M1 | ResizeAndNorm、Letterbox 函数声明 |
 | `include/inference_backend.h` | M2 | InferenceBackend 纯虚基类声明 |
 | `include/onnx_backend.h` | M3 | OnnxBackend 类声明（PImpl 模式） |
+| `include/ncnn_backend.h` | M4 | NcnnBackend 类声明（PImpl 模式） |
 | `src/utils/logger.cpp` | M0 | Logger 实现（时间戳+级别前缀） |
 | `src/utils/timer.cpp` | M0 | Timer 实现（steady_clock） |
 | `src/preprocess/preprocess.cpp` | M1 | ResizeAndNorm、Letterbox 实现 |
 | `src/backend/onnx_backend.cpp` | M3 | OnnxBackend 实现（PImpl，Ort::Session 封装，CoreML EP 使用 AppendExecutionProvider 新 API） |
-| `src/main.cpp` | M0+M3 | 主入口（Logger+Timer+OnnxBackend 演示） |
+| `src/backend/ncnn_backend.cpp` | M4 | NcnnBackend 实现（PImpl，ncnn::Net 封装，Vulkan GPU 自动加速） |
+| `src/main.cpp` | M0+M3+M4 | 主入口（Logger+Timer+OnnxBackend+NcnnBackend 演示） |
 
 ## 依赖项
 
@@ -66,7 +70,7 @@ Inference-Service/
 |------|------|------|
 | OpenCV | 4.13.0 (Homebrew) | ✅ 已安装并链接（core, imgproc, imgcodecs） |
 | onnxruntime | 1.26.0 (Homebrew) | ✅ 已安装并链接（via CMake imported target） |
-| ncnn | 最新版 | ❌ 待安装（M4 需要） |
+| ncnn | 20260526 (Homebrew) | ✅ 已安装并链接 |
 | Llama.cpp | - | ❌ 待安装（M7 需要） |
 | cpp-httplib | - | ❌ 待安装（M9 需要） |
 | Google Test | - | ❌ 待安装（M10 需要） |
@@ -91,7 +95,7 @@ make
 ## 未完成任务清单
 
 - [x] M3. ONNX Runtime 后端 — 依赖 M2, ONNX Runtime ✅ 已完成
-- [ ] M4. NCNN 后端 — 依赖 M2, NCNN
+- [x] M4. NCNN 后端 — 依赖 M2, NCNN ✅ 已完成
 - [ ] M5. YOLO 后处理 — 依赖 M1
 - [ ] M6. 目标检测器 — 依赖 M2, M5
 - [ ] M7. LLM 文本生成模块 — 依赖 Llama.cpp
@@ -125,6 +129,5 @@ make
 
 ## 下一步行动建议
 
-1. **实现 M4：NCNN 后端** — 继承 InferenceBackend，封装 NCNN 推理，同样使用 PImpl 模式
-2. 安装 ncnn 库并添加到 CMakeLists.txt
-3. 实现后更新 TASKS.md 和 HANDOVER.md
+1. **实现 M5：YOLO 后处理** — 实现 NMS、bbox 解码、置信度过滤
+2. 更新 TASKS.md 和 HANDOVER.md

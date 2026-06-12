@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs)
 
-# 查找 onnxruntime：优先 CMake config，失败则手动搜索
+# ---- 查找 onnxruntime：优先 CMake config，失败则手动搜索 ----
 find_package(onnxruntime QUIET)
 if(onnxruntime_FOUND)
     set(ORT_LINK_TARGET onnxruntime::onnxruntime)
@@ -49,12 +49,54 @@ else()
     endif()
 endif()
 
+# ---- 查找 ncnn：优先 CMake config，失败则手动搜索 ----
+find_package(ncnn QUIET)
+if(ncnn_FOUND)
+    set(NCNN_LINK_TARGET ncnn)
+    message(STATUS "ncnn found via CMake config")
+else()
+    if(NOT NCNN_ROOT)
+        set(NCNN_ROOT $ENV{NCNN_ROOT})
+    endif()
+
+    set(_NCNN_SEARCH_PATHS
+        ${NCNN_ROOT}
+        /opt/homebrew
+        /usr/local
+        /usr
+    )
+
+    find_path(NCNN_INCLUDE_DIR
+        NAMES net.h
+        PATHS ${_NCNN_SEARCH_PATHS}
+        PATH_SUFFIXES include/ncnn include)
+
+    find_library(NCNN_LIB
+        NAMES ncnn
+        PATHS ${_NCNN_SEARCH_PATHS}
+        PATH_SUFFIXES lib lib64)
+
+    if(NCNN_INCLUDE_DIR AND NCNN_LIB)
+        set(NCNN_LINK_TARGET ${NCNN_LIB})
+        message(STATUS "ncnn found: include=${NCNN_INCLUDE_DIR}, lib=${NCNN_LIB}")
+    else()
+        message(FATAL_ERROR
+            "ncnn not found.\n"
+            "Options:\n"
+            "  1. Install via package manager (brew install ncnn)\n"
+            "  2. Build from source: https://github.com/Tencent/ncnn#build\n"
+            "  3. Specify path: cmake -DNCNN_ROOT=/path/to/ncnn ..\n"
+            "  4. Set environment variable: export NCNN_ROOT=/path/to/ncnn")
+    endif()
+endif()
+
 add_executable(inference_service
     src/main.cpp
     src/utils/logger.cpp
     src/utils/timer.cpp
     src/preprocess/preprocess.cpp
     src/backend/onnx_backend.cpp
+    src/backend/ncnn_backend.cpp
 )
 
 target_include_directories(inference_service PRIVATE include)
@@ -64,4 +106,19 @@ if(ONNXRUNTIME_INCLUDE_DIR)
     target_include_directories(inference_service PRIVATE ${ONNXRUNTIME_INCLUDE_DIR})
 endif()
 
-target_link_libraries(inference_service ${OpenCV_LIBS} ${ORT_LINK_TARGET})
+# 手动搜索模式需要额外添加 ncnn include 目录
+if(NCNN_INCLUDE_DIR)
+    target_include_directories(inference_service PRIVATE ${NCNN_INCLUDE_DIR})
+endif()
+
+target_link_libraries(inference_service ${OpenCV_LIBS} ${ORT_LINK_TARGET} ${NCNN_LINK_TARGET})
+
+# macOS 上 ncnn Vulkan 依赖 Metal 框架，手动搜索模式下可能需要显式链接
+if(APPLE AND NOT ncnn_FOUND)
+    find_library(METAL_FRAMEWORK Metal)
+    find_library(FOUNDATION_FRAMEWORK Foundation)
+    if(METAL_FRAMEWORK AND FOUNDATION_FRAMEWORK)
+        target_link_libraries(inference_service ${METAL_FRAMEWORK} ${FOUNDATION_FRAMEWORK})
+        message(STATUS "Linking Metal frameworks for ncnn Vulkan support")
+    endif()
+endif()
