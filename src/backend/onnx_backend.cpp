@@ -4,6 +4,10 @@
 
 #include <onnxruntime_cxx_api.h>
 
+#if defined(__APPLE__) && defined(__arm64__)
+#include <coreml_provider_factory.h>
+#endif
+
 #include <filesystem>
 #include <stdexcept>
 
@@ -38,11 +42,31 @@ struct OnnxBackend::Impl {
     // 初始化 ONNX Runtime 环境和会话选项
     // env: 日志级别为 Warning，仅输出警告和错误信息
     // session_options: IntraOp 线程数设为 1（单线程推理），图优化级别设为 ORT_ENABLE_ALL（启用所有可用优化）
+    // Apple Silicon 上额外尝试注册 CoreML EP，失败时静默回退到 CPU
     Impl()
         : env(ORT_LOGGING_LEVEL_WARNING, "inference") {
         session_options.SetIntraOpNumThreads(1);
         session_options.SetGraphOptimizationLevel(
             GraphOptimizationLevel::ORT_ENABLE_ALL);
+
+#if defined(__APPLE__) && defined(__arm64__)
+        // 在 Apple Silicon 上尝试启用 CoreML Execution Provider
+        // COREML_FLAG_USE_NONE: 不限制计算单元，让 CoreML 自动选择最优硬件（ANE > GPU > CPU）
+        // 失败时静默回退到 CPU，不影响正常推理
+        try {
+            OrtStatus* status = OrtSessionOptionsAppendExecutionProvider_CoreML(
+                session_options, COREML_FLAG_USE_NONE);
+            if (status) {
+                Ort::Status ort_status(status);
+                Logger::Warning("CoreML Execution Provider registration failed: "
+                                + std::string(ort_status.GetErrorMessage()));
+            } else {
+                Logger::Info("CoreML Execution Provider enabled on Apple Silicon");
+            }
+        } catch (...) {
+            Logger::Warning("CoreML Execution Provider not available, falling back to CPU");
+        }
+#endif
     }
 
     // 从已加载的 Ort::Session 中提取并缓存模型元信息

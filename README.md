@@ -8,7 +8,7 @@
 - 构建系统：CMake 3.15+
 - 代码风格：Google C++ Style Guide
 - 核心依赖：OpenCV 4.x、onnxruntime (>=1.15.0)、ncnn（最新版）
-- 平台限制：Ubuntu 20.04+ 或 Windows 10 (msvc)，专注于 CPU 推理
+- 平台兼容性：macOS（Apple Silicon M 系列）和 Linux（Ubuntu 20.04+），架构设计保持可扩展性以便未来兼容更多平台
 
 ## 目录结构
 

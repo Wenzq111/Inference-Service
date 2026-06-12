@@ -102,6 +102,7 @@ public:
 | 为什么 Logger 使用静态方法而非单例？ | Logger 无状态依赖，静态方法更简洁，避免单例的线程安全和生命周期管理问题 | 已完善 |
 | 预处理函数为什么要加 target_w/target_h 边界检查？ | OpenCV 的 resize 对非法尺寸会产生未定义行为或崩溃，防御性检查避免下游错误 | 已完善 |
 | InferenceBackend 接口中为何增加 GetInputNames/GetOutputNames？ | ONNX Runtime 和 NCNN 都依赖输入/输出节点名称来绑定数据，后端实现必须暴露这些名称供上层调用 | 已完善 |
+| 为什么项目要求跨平台兼容？ | macOS（Apple Silicon）和 Linux 是主流部署平台；条件编译隔离平台特有代码（如 CoreML EP 仅 Apple Silicon）保证其他平台零影响；CMake 多路径查找和 `ONNXRUNTIME_ROOT` 变量支持自定义安装位置；架构保持可扩展性便于未来添加 Windows、Android 等平台支持 | 已完善 |
 
 ## 5. 性能优化方向
 
@@ -113,4 +114,7 @@ public:
 
 ## 6. 已知限制与未来扩展
 
-[待补充]
+- 当前仅验证 macOS (Apple Silicon) 和 Linux (Ubuntu 20.04+) 编译运行，Windows 支持待验证
+- 平台特有功能（CoreML EP）通过条件编译隔离，未来可类似方式添加 CUDA EP（Linux/Windows）、NNAPI EP（Android）等
+- `localtime_r` 在 Windows 上不兼容，后续需封装跨平台时间函数
+- CMake 依赖查找已支持多平台路径和用户自定义路径，可随平台扩展继续添加搜索路径

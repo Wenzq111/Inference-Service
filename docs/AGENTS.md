@@ -8,7 +8,7 @@
 - **构建系统**：CMake 3.15+
 - **代码风格**：Google C++ Style Guide
 - **核心依赖**：OpenCV 4.x (core, imgproc, imgcodecs)、onnxruntime (>=1.15.0)、ncnn（最新版）
-- **平台限制**：本机为Macos 15.7.7 同时也要支持Ubuntu 20.04+ 或 Windows 10 (msvc)，专注于 CPU 推理，无需 GPU 开发。
+- **平台兼容性**：项目代码必须兼容 macOS（Apple Silicon M 系列）和 Linux（Ubuntu 20.04+），架构设计须保持可扩展性以便未来兼容更多平台（如 Windows、Android）。所有平台相关代码须通过条件编译（`#if defined(...)）隔离，不得硬编码平台路径或依赖。
 - **构建脚本**：`build.sh`（全量重建）、`rebuild.sh`（增量编译）
 
 ## 目录结构约定
@@ -56,6 +56,7 @@ Inference-Service/
 5. **安全规则**：执行 `git commit`、`git push` 或 `git merge` 等修改远程仓库的命令前，必须先将拟执行的命令展示给用户，并在获得明确确认后方可执行。严禁使用 `git push --force`。
 6. 代码注释规范：每个函数/类/结构体必须有 `//` 注释说明用途。
 7. 代码提交规范：每次提交前必须先编译验证代码能正常运行，commit 信息使用中文。
+8. **跨平台规则**：所有新增代码必须兼容 macOS（Apple Silicon）和 Linux 两大平台；平台特有功能（如 Apple CoreML EP）通过条件编译隔离，其他平台不受影响；避免使用不可移植的 API（如 `localtime_r` 等），必要时封装跨平台兼容层；CMake 查找依赖须支持多平台搜索路径和用户自定义路径（如 `ONNXRUNTIME_ROOT`）。
 
 ## 编译与验证
 

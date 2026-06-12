@@ -110,6 +110,7 @@ make
 - 注释：`//` 单行注释，每个函数/类/结构体必须有注释
 - 代码风格：Google C++ Style Guide
 - commit 信息：中文
+- **跨平台规则**：代码须兼容 macOS（Apple Silicon）和 Linux；平台特有功能通过条件编译隔离；CMake 依赖查找须支持多平台路径和用户自定义路径
 
 ## 已知技术债
 
