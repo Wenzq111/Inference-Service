@@ -57,7 +57,7 @@ Inference-Service/
 | `src/utils/logger.cpp` | M0 | Logger 实现（时间戳+级别前缀） |
 | `src/utils/timer.cpp` | M0 | Timer 实现（steady_clock） |
 | `src/preprocess/preprocess.cpp` | M1 | ResizeAndNorm、Letterbox 实现 |
-| `src/backend/onnx_backend.cpp` | M3 | OnnxBackend 实现（PImpl，Ort::Session 封装） |
+| `src/backend/onnx_backend.cpp` | M3 | OnnxBackend 实现（PImpl，Ort::Session 封装，CoreML EP 使用 AppendExecutionProvider 新 API） |
 | `src/main.cpp` | M0+M3 | 主入口（Logger+Timer+OnnxBackend 演示） |
 
 ## 依赖项
