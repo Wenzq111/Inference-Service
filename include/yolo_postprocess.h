@@ -36,7 +36,8 @@ std::vector<Detection> ProcessYoloOutput(const std::vector<float>& output,
                                          int image_width,
                                          int image_height);
 
-// 将 Detection 坐标从模型输入尺寸缩放到原始图像尺寸
+// 将 Detection 坐标从模型输入尺寸缩放到原始图像尺寸（简单线性缩放）
+// 适用于 ResizeAndNorm 等无偏移预处理方式
 // detections: 基于模型输入尺寸的检测结果
 // src_width, src_height: 原始图像尺寸
 // target_width, target_height: 模型输入尺寸（与 ProcessYoloOutput 的 image_width/height 一致）
@@ -45,5 +46,19 @@ std::vector<Detection> ScaleDetectionsToOriginal(
     const std::vector<Detection>& detections,
     int src_width, int src_height,
     int target_width, int target_height);
+
+// 将 Detection 坐标从模型输入尺寸缩放到原始图像尺寸（Letterbox 模式）
+// 适用于 M1 Letterbox 预处理产生的带偏移和灰色填充的图像
+// 先减去 Letterbox 居中偏移量，再除以缩放比例，最后裁剪到原图边界
+// detections: 基于模型输入尺寸的检测结果
+// x_offset, y_offset: Letterbox 预处理时图像居中放置的偏移量（像素）
+// scale: Letterbox 预处理时的缩放比例
+// src_width, src_height: 原始图像尺寸
+// 返回: 缩放后的 Detection 列表，坐标基于原始图像尺寸，不修改原 detections
+std::vector<Detection> ScaleDetectionsToOriginal(
+    const std::vector<Detection>& detections,
+    int x_offset, int y_offset,
+    float scale,
+    int src_width, int src_height);
 
 }  // namespace inference

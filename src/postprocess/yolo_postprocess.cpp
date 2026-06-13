@@ -188,7 +188,8 @@ std::vector<Detection> ProcessYoloOutput(const std::vector<float>& output,
     return Nms(candidates, nms_thresh);
 }
 
-// 将 Detection 坐标从模型输入尺寸缩放到原始图像尺寸
+// 将 Detection 坐标从模型输入尺寸缩放到原始图像尺寸（简单线性缩放）
+// 适用于 ResizeAndNorm 等无偏移预处理方式
 // 对每个检测框乘以缩放因子并裁剪到原图边界，不修改原 detections
 // 返回: 缩放后的 Detection 列表，坐标基于原始图像尺寸
 std::vector<Detection> ScaleDetectionsToOriginal(
@@ -221,6 +222,67 @@ std::vector<Detection> ScaleDetectionsToOriginal(
         scaled.y1 = std::max(0.0f, std::min(det.y1 * scale_y, max_y));
         scaled.x2 = std::max(0.0f, std::min(det.x2 * scale_x, max_x));
         scaled.y2 = std::max(0.0f, std::min(det.y2 * scale_y, max_y));
+        scaled.class_id = det.class_id;
+        scaled.confidence = det.confidence;
+        result.push_back(scaled);
+    }
+
+    return result;
+}
+
+// 将 Detection 坐标从模型输入尺寸缩放到原始图像尺寸（Letterbox 模式）
+// 处理 Letterbox 预处理引入的偏移和缩放：
+//   1. 减偏移：x' = x - x_offset, y' = y - y_offset
+//   2. 除缩放比：x_orig = x' / scale, y_orig = y' / scale
+//   3. 裁剪到原图边界 [0, src_width-1] / [0, src_height-1]
+// 不修改原 detections，返回新的 Detection 列表
+std::vector<Detection> ScaleDetectionsToOriginal(
+    const std::vector<Detection>& detections,
+    int x_offset, int y_offset,
+    float scale,
+    int src_width, int src_height) {
+    if (detections.empty()) {
+        return {};
+    }
+
+    if (scale <= 0.0f) {
+        Logger::Warning(
+            "ScaleDetectionsToOriginal: invalid scale " +
+            std::to_string(scale) + ", must be positive");
+        return {};
+    }
+
+    if (x_offset < 0 || y_offset < 0) {
+        Logger::Warning(
+            "ScaleDetectionsToOriginal: invalid offset (" +
+            std::to_string(x_offset) + ", " + std::to_string(y_offset) +
+            "), must be non-negative");
+        return {};
+    }
+
+    if (src_width <= 0 || src_height <= 0) {
+        Logger::Warning(
+            "ScaleDetectionsToOriginal: invalid src dimensions " +
+            std::to_string(src_width) + "x" + std::to_string(src_height));
+        return {};
+    }
+
+    float inv_scale = 1.0f / scale;
+    float max_x = static_cast<float>(src_width - 1);
+    float max_y = static_cast<float>(src_height - 1);
+    float offset_x = static_cast<float>(x_offset);
+    float offset_y = static_cast<float>(y_offset);
+
+    std::vector<Detection> result;
+    result.reserve(detections.size());
+
+    for (const auto& det : detections) {
+        Detection scaled;
+        // 减偏移 → 除缩放比 → 裁剪边界
+        scaled.x1 = std::max(0.0f, std::min((det.x1 - offset_x) * inv_scale, max_x));
+        scaled.y1 = std::max(0.0f, std::min((det.y1 - offset_y) * inv_scale, max_y));
+        scaled.x2 = std::max(0.0f, std::min((det.x2 - offset_x) * inv_scale, max_x));
+        scaled.y2 = std::max(0.0f, std::min((det.y2 - offset_y) * inv_scale, max_y));
         scaled.class_id = det.class_id;
         scaled.confidence = det.confidence;
         result.push_back(scaled);
