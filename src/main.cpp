@@ -2,14 +2,17 @@
 #include "timer.h"
 #include "onnx_backend.h"
 #include "ncnn_backend.h"
+#include "detector.h"
 
 #include <memory>
 #include <thread>
 #include <chrono>
 
+#include <opencv2/opencv.hpp>
+
 using namespace inference;
 
-// 程序入口，演示 Logger、Timer、OnnxBackend 和 NcnnBackend 功能
+// 程序入口，演示 Logger、Timer、OnnxBackend、NcnnBackend 和 ObjectDetector 功能
 int main() {
     // 设置日志过滤级别为 Debug，确保所有级别日志均可输出
     Logger::SetLevel(LogLevel::Debug);
@@ -34,6 +37,25 @@ int main() {
     // 演示 NCNN 后端创建
     auto ncnn_backend = std::make_unique<NcnnBackend>();
     Logger::Info("NCNN backend created successfully");
+
+    // 演示 ObjectDetector 创建并尝试加载模型
+    // 使用独立的 OnnxBackend 实例，避免与上面的创建演示冲突
+    auto onnx_backend_det = std::make_unique<OnnxBackend>();
+    if (onnx_backend_det->LoadModel("models/yolov5s.onnx")) {
+        auto detector = std::make_unique<ObjectDetector>(std::move(onnx_backend_det));
+        detector->SetInputSize(640, 640);
+        Logger::Info("ObjectDetector created successfully with ONNX backend");
+
+        cv::Mat test_img = cv::imread("models/test.jpg");
+        if (!test_img.empty()) {
+            auto dets = detector->Detect(test_img);
+            Logger::Info("Detected " + std::to_string(dets.size()) + " objects");
+        } else {
+            Logger::Info("No test image found, skipping detection demo");
+        }
+    } else {
+        Logger::Warning("Failed to load ONNX model, detection demo skipped");
+    }
 
     return 0;
 }

@@ -98,6 +98,7 @@ add_executable(inference_service
     src/backend/onnx_backend.cpp
     src/backend/ncnn_backend.cpp
     src/postprocess/yolo_postprocess.cpp
+    src/detector/object_detector.cpp
 )
 
 target_include_directories(inference_service PRIVATE include)

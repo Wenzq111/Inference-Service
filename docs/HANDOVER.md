@@ -5,9 +5,9 @@
 
 ## 项目整体状态
 
-- 已完成模块：M0（项目骨架）、M1（图像预处理）、M2（推理后端抽象接口）、M3（ONNX Runtime 后端）、M4（NCNN 后端）、M5（YOLO 后处理）
-- 代码量估算：约 1500 行（不含注释和文档）
-- 当前可编译运行，输出 Logger、Timer、OnnxBackend 和 NcnnBackend 创建演示日志
+- 已完成模块：M0（项目骨架）、M1（图像预处理）、M2（推理后端抽象接口）、M3（ONNX Runtime 后端）、M4（NCNN 后端）、M5（YOLO 后处理）、M6（目标检测器）
+- 代码量估算：约 1900 行（不含注释和文档）
+- 当前可编译运行，输出 Logger、Timer、OnnxBackend、NcnnBackend 和 ObjectDetector 演示日志
 
 ## 目录结构
 
@@ -21,6 +21,7 @@ Inference-Service/
 │   ├── onnx_backend.h
 │   └── ncnn_backend.h
 │   └── yolo_postprocess.h
+│   └── detector.h
 ├── src/
 │   ├── main.cpp
 │   ├── utils/
@@ -33,7 +34,9 @@ Inference-Service/
 │   │   └── ncnn_backend.cpp
 │   ├── postprocess/
 │   │   └── yolo_postprocess.cpp
-│   ├── detector/         （待开发）
+│   ├── detector/
+│   │   └── object_detector.cpp
+│   ├── detector/            # 目标检测器（ObjectDetector）
 │   ├── llm/              （待开发）
 │   ├── pipeline/         （待开发）
 │   └── server/           （待开发）
@@ -55,18 +58,20 @@ Inference-Service/
 |------|------|------|
 | `include/logger.h` | M0 | Logger 类声明 |
 | `include/timer.h` | M0 | Timer 类声明 |
-| `include/preprocess.h` | M1 | ResizeAndNorm、Letterbox 函数声明 |
+| `include/preprocess.h` | M1 | ResizeAndNorm、MatToChw、Letterbox 函数声明，LetterboxResult 结构体 |
 | `include/inference_backend.h` | M2 | InferenceBackend 纯虚基类声明 |
 | `include/onnx_backend.h` | M3 | OnnxBackend 类声明（PImpl 模式） |
 | `include/ncnn_backend.h` | M4 | NcnnBackend 类声明（PImpl 模式） |
 | `src/utils/logger.cpp` | M0 | Logger 实现（时间戳+级别前缀） |
 | `src/utils/timer.cpp` | M0 | Timer 实现（steady_clock） |
-| `src/preprocess/preprocess.cpp` | M1 | ResizeAndNorm、Letterbox 实现 |
+| `src/preprocess/preprocess.cpp` | M1 | ResizeAndNorm、MatToChw、Letterbox 实现 |
 | `src/backend/onnx_backend.cpp` | M3 | OnnxBackend 实现（PImpl，Ort::Session 封装，CoreML EP 使用 AppendExecutionProvider 新 API） |
 | `src/backend/ncnn_backend.cpp` | M4 | NcnnBackend 实现（PImpl，ncnn::Net 封装，Vulkan GPU 自动加速） |
 | `include/yolo_postprocess.h` | M5 | Detection 结构体 + ProcessYoloOutput / ScaleDetectionsToOriginal 函数声明 |
 | `src/postprocess/yolo_postprocess.cpp` | M5 | YOLO 后处理实现（NMS、bbox 解码、置信度过滤、坐标缩放） |
-| `src/main.cpp` | M0+M3+M4 | 主入口（Logger+Timer+OnnxBackend+NcnnBackend 演示） |
+| `include/detector.h` | M6 | ObjectDetector 类声明（组合后端+预处理+后处理） |
+| `src/detector/object_detector.cpp` | M6 | ObjectDetector 实现（Detect: Letterbox→MatToChw→Predict→ProcessYoloOutput→ScaleDetectionsToOriginal） |
+| `src/main.cpp` | M0+M3+M4+M6 | 主入口（Logger+Timer+OnnxBackend+NcnnBackend+ObjectDetector 演示） |
 
 ## 依赖项
 
@@ -101,7 +106,7 @@ make
 - [x] M3. ONNX Runtime 后端 — 依赖 M2, ONNX Runtime ✅ 已完成
 - [x] M4. NCNN 后端 — 依赖 M2, NCNN ✅ 已完成
 - [x] M5. YOLO 后处理 — 依赖 M1 ✅ 已完成
-- [ ] M6. 目标检测器 — 依赖 M2, M5
+- [x] M6. 目标检测器 — 依赖 M2, M5 ✅ 已完成
 - [ ] M7. LLM 文本生成模块 — 依赖 Llama.cpp
 - [ ] M8. 批量预处理流水线 — 依赖 M1
 - [ ] M9. REST API 服务 — 依赖 M3/M6/M7, cpp-httplib
@@ -135,5 +140,5 @@ make
 
 ## 下一步行动建议
 
-1. **实现 M6：目标检测器** — 组合后端 + M5 后处理，提供 Detect(cv::Mat) 接口
+1. **实现 M7：LLM 文本生成模块** — 封装 Llama.cpp，提供 Load 和 Generate 接口
 2. 更新 TASKS.md 和 HANDOVER.md
