@@ -9,7 +9,7 @@
 - [x] M2. 推理后端抽象接口 — 150行 — 无依赖 — 定义纯虚基类 InferenceBackend，包含 LoadModel、Predict、GetInputShapes 方法
 - [x] M3. ONNX Runtime 后端 — 500行 — 依赖 M2, ONNX Runtime — 实现 InferenceBackend 接口，封装 ONNX Runtime 推理，支持动态输入形状和 int8 量化选项
 - [x] M4. NCNN 后端 — 500行 — 依赖 M2, NCNN — 实现 InferenceBackend 接口，封装 NCNN 推理，开启 fp16 和 Winograd 优化
-- [ ] M5. YOLO 后处理 — 400行 — 依赖 M1 — 实现 NMS（非极大值抑制）、边界框解码、置信度过滤，输出 Detection 结构体
+- [x] M5. YOLO 后处理 — 400行 — 依赖 M1 — 实现 NMS（非极大值抑制）、边界框解码、置信度过滤，输出 Detection 结构体
 - [ ] M6. 目标检测器 — 300行 — 依赖 M2, M5 — 组合后端和后处理，提供 Detect(cv::Mat) 接口，内部自动调用预处理和后处理
 - [ ] M7. LLM 文本生成模块 — 600行 — 依赖 Llama.cpp — 封装 Llama.cpp，提供 Load 和 Generate（支持流式回调）接口，与检测模块独立
 - [ ] M8. 批量预处理流水线 — 500行 — 依赖 M1 — 实现生产者-消费者队列，多线程并行预处理图像，支持批次等待和超时
@@ -26,7 +26,7 @@
 | M2 推理后端抽象接口 | ✅ 完成 | inference_backend.h |
 | M3 ONNX Runtime 后端 | ✅ 完成 | onnx_backend.h, onnx_backend.cpp |
 | M4 NCNN 后端 | ✅ 完成 | ncnn_backend.h, ncnn_backend.cpp |
-| M5 YOLO 后处理 | 待开发 | - |
+| M5 YOLO 后处理 | ✅ 完成 | yolo_postprocess.h, yolo_postprocess.cpp |
 | M6 目标检测器 | 待开发 | - |
 | M7 LLM 文本生成模块 | 待开发 | - |
 | M8 批量预处理流水线 | 待开发 | - |

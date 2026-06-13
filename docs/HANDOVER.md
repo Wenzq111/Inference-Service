@@ -5,8 +5,8 @@
 
 ## 项目整体状态
 
-- 已完成模块：M0（项目骨架）、M1（图像预处理）、M2（推理后端抽象接口）、M3（ONNX Runtime 后端）、M4（NCNN 后端）
-- 代码量估算：约 1100 行（不含注释和文档）
+- 已完成模块：M0（项目骨架）、M1（图像预处理）、M2（推理后端抽象接口）、M3（ONNX Runtime 后端）、M4（NCNN 后端）、M5（YOLO 后处理）
+- 代码量估算：约 1500 行（不含注释和文档）
 - 当前可编译运行，输出 Logger、Timer、OnnxBackend 和 NcnnBackend 创建演示日志
 
 ## 目录结构
@@ -20,6 +20,7 @@ Inference-Service/
 │   ├── inference_backend.h
 │   ├── onnx_backend.h
 │   └── ncnn_backend.h
+│   └── yolo_postprocess.h
 ├── src/
 │   ├── main.cpp
 │   ├── utils/
@@ -30,7 +31,8 @@ Inference-Service/
 │   ├── backend/
 │   │   ├── onnx_backend.cpp
 │   │   └── ncnn_backend.cpp
-│   ├── postprocess/      （待开发）
+│   ├── postprocess/
+│   │   └── yolo_postprocess.cpp
 │   ├── detector/         （待开发）
 │   ├── llm/              （待开发）
 │   ├── pipeline/         （待开发）
@@ -62,6 +64,8 @@ Inference-Service/
 | `src/preprocess/preprocess.cpp` | M1 | ResizeAndNorm、Letterbox 实现 |
 | `src/backend/onnx_backend.cpp` | M3 | OnnxBackend 实现（PImpl，Ort::Session 封装，CoreML EP 使用 AppendExecutionProvider 新 API） |
 | `src/backend/ncnn_backend.cpp` | M4 | NcnnBackend 实现（PImpl，ncnn::Net 封装，Vulkan GPU 自动加速） |
+| `include/yolo_postprocess.h` | M5 | Detection 结构体 + ProcessYoloOutput / ScaleDetectionsToOriginal 函数声明 |
+| `src/postprocess/yolo_postprocess.cpp` | M5 | YOLO 后处理实现（NMS、bbox 解码、置信度过滤、坐标缩放） |
 | `src/main.cpp` | M0+M3+M4 | 主入口（Logger+Timer+OnnxBackend+NcnnBackend 演示） |
 
 ## 依赖项
@@ -96,7 +100,7 @@ make
 
 - [x] M3. ONNX Runtime 后端 — 依赖 M2, ONNX Runtime ✅ 已完成
 - [x] M4. NCNN 后端 — 依赖 M2, NCNN ✅ 已完成
-- [ ] M5. YOLO 后处理 — 依赖 M1
+- [x] M5. YOLO 后处理 — 依赖 M1 ✅ 已完成
 - [ ] M6. 目标检测器 — 依赖 M2, M5
 - [ ] M7. LLM 文本生成模块 — 依赖 Llama.cpp
 - [ ] M8. 批量预处理流水线 — 依赖 M1
@@ -126,8 +130,10 @@ make
 | InferenceBackend 使用 vector<vector<float>> | 批量推理时内存拷贝开销大 | 改用连续内存 + 形状信息方案 |
 | Timer 不支持多次分段计时 | 只能测量单段耗时 | 扩展 LapTimer 支持多段计时 |
 | OnnxBackend Predict 拷贝输入数据 | CreateTensor 要求非 const 指针，需额外拷贝 | 改用 Ort::Value::CreateTensor 分配器模式，避免用户数据拷贝 |
+| NMS 算法 O(n²) 复杂度 | 检测框数量多时后处理耗时较长 | 改用 Soft-NMS（降低重叠框置信度而非直接剔除）或分区索引（按类别/空间区域分组后分别 NMS） |
+| ProcessYoloOutput 硬编码 85 元素 | 仅支持 YOLOv5/v8 的 80 类输出，其他变体（如 4 类、20 类）不兼容 | 将 kBoxElementCount 和 kClassCount 改为函数参数，支持不同 YOLO 变体 |
 
 ## 下一步行动建议
 
-1. **实现 M5：YOLO 后处理** — 实现 NMS、bbox 解码、置信度过滤
+1. **实现 M6：目标检测器** — 组合后端 + M5 后处理，提供 Detect(cv::Mat) 接口
 2. 更新 TASKS.md 和 HANDOVER.md
