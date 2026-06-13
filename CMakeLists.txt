@@ -90,6 +90,68 @@ else()
     endif()
 endif()
 
+# ---- 查找 llama.cpp：优先 CMake config，失败则手动搜索 ----
+find_package(llama QUIET)
+if(llama_FOUND)
+    set(LLAMA_LINK_TARGET llama)
+    message(STATUS "llama.cpp found via CMake config")
+    # llama CMake config 可能导出 ggml 依赖，尝试查找
+    find_package(ggml QUIET)
+    if(ggml_FOUND)
+        set(GGML_LINK_TARGET ggml::ggml)
+        message(STATUS "ggml found via CMake config")
+    else()
+        set(GGML_LINK_TARGET "")
+        message(STATUS "ggml not found separately, assuming linked into llama")
+    endif()
+else()
+    if(NOT LLAMA_ROOT)
+        set(LLAMA_ROOT $ENV{LLAMA_ROOT})
+    endif()
+
+    set(_LLAMA_SEARCH_PATHS
+        ${LLAMA_ROOT}
+        /opt/homebrew
+        /usr/local
+        /usr
+    )
+
+    find_path(LLAMA_INCLUDE_DIR
+        NAMES llama.h
+        PATHS ${_LLAMA_SEARCH_PATHS}
+        PATH_SUFFIXES include)
+
+    find_library(LLAMA_LIB
+        NAMES llama
+        PATHS ${_LLAMA_SEARCH_PATHS}
+        PATH_SUFFIXES lib lib64)
+
+    find_library(GGML_LIB
+        NAMES ggml
+        PATHS ${_LLAMA_SEARCH_PATHS}
+        PATH_SUFFIXES lib lib64)
+
+    if(LLAMA_INCLUDE_DIR AND LLAMA_LIB)
+        set(LLAMA_LINK_TARGET ${LLAMA_LIB})
+        message(STATUS "llama.cpp found: include=${LLAMA_INCLUDE_DIR}, lib=${LLAMA_LIB}")
+        if(GGML_LIB)
+            set(GGML_LINK_TARGET ${GGML_LIB})
+            message(STATUS "ggml found: lib=${GGML_LIB}")
+        else()
+            set(GGML_LINK_TARGET "")
+            message(STATUS "ggml not found separately, assuming linked into llama")
+        endif()
+    else()
+        message(FATAL_ERROR
+            "llama.cpp not found.\n"
+            "Options:\n"
+            "  1. Install via package manager (brew install llama.cpp)\n"
+            "  2. Build from source: https://github.com/ggml-org/llama.cpp\n"
+            "  3. Specify path: cmake -DLLAMA_ROOT=/path/to/llama.cpp ..\n"
+            "  4. Set environment variable: export LLAMA_ROOT=/path/to/llama.cpp")
+    endif()
+endif()
+
 add_executable(inference_service
     src/main.cpp
     src/utils/logger.cpp
@@ -99,6 +161,7 @@ add_executable(inference_service
     src/backend/ncnn_backend.cpp
     src/postprocess/yolo_postprocess.cpp
     src/detector/object_detector.cpp
+    src/llm/llm_generator.cpp
 )
 
 target_include_directories(inference_service PRIVATE include)
@@ -113,7 +176,12 @@ if(NCNN_INCLUDE_DIR)
     target_include_directories(inference_service PRIVATE ${NCNN_INCLUDE_DIR})
 endif()
 
-target_link_libraries(inference_service ${OpenCV_LIBS} ${ORT_LINK_TARGET} ${NCNN_LINK_TARGET})
+# 手动搜索模式需要额外添加 llama include 目录
+if(LLAMA_INCLUDE_DIR)
+    target_include_directories(inference_service PRIVATE ${LLAMA_INCLUDE_DIR})
+endif()
+
+target_link_libraries(inference_service ${OpenCV_LIBS} ${ORT_LINK_TARGET} ${NCNN_LINK_TARGET} ${LLAMA_LINK_TARGET} ${GGML_LINK_TARGET})
 
 # macOS 上 ncnn Vulkan 依赖 Metal 框架，手动搜索模式下可能需要显式链接
 if(APPLE AND NOT ncnn_FOUND)

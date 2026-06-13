@@ -3,6 +3,7 @@
 #include "onnx_backend.h"
 #include "ncnn_backend.h"
 #include "detector.h"
+#include "llm_generator.h"
 
 #include <memory>
 #include <thread>
@@ -55,6 +56,30 @@ int main() {
         }
     } else {
         Logger::Warning("Failed to load ONNX model, detection demo skipped");
+    }
+
+    // 演示 LlamaGenerator 文本生成
+    auto llm = std::make_unique<LlamaGenerator>();
+    if (llm->LoadModel("models/llama.gguf")) {
+        Logger::Info("LlamaGenerator model loaded, context_size=" +
+                     std::to_string(llm->GetContextSize()));
+
+        // 非流式生成
+        GenerationConfig config;
+        config.max_tokens = 128;
+        config.temperature = 0.7f;
+        std::string reply = llm->Generate("Hello, how are you?", config);
+        Logger::Info("LLM reply: " + reply);
+
+        // 流式生成
+        Logger::Info("LLM stream: ");
+        llm->GenerateStream("Tell me a short joke.",
+            [](const std::string& piece) {
+                std::cout << piece << std::flush;
+            }, config);
+        std::cout << std::endl;
+    } else {
+        Logger::Warning("Failed to load LLM model, LLM demo skipped");
     }
 
     return 0;

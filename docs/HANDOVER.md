@@ -1,13 +1,13 @@
 # 项目交接文档 (HANDOVER.md)
 
 创建日期：2026-05-30
-最后更新：2026-06-07
+最后更新：2026-06-14
 
 ## 项目整体状态
 
-- 已完成模块：M0（项目骨架）、M1（图像预处理）、M2（推理后端抽象接口）、M3（ONNX Runtime 后端）、M4（NCNN 后端）、M5（YOLO 后处理）、M6（目标检测器）
-- 代码量估算：约 1900 行（不含注释和文档）
-- 当前可编译运行，输出 Logger、Timer、OnnxBackend、NcnnBackend 和 ObjectDetector 演示日志
+- 已完成模块：M0（项目骨架）、M1（图像预处理）、M2（推理后端抽象接口）、M3（ONNX Runtime 后端）、M4（NCNN 后端）、M5（YOLO 后处理）、M6（目标检测器）、M7（LLM 文本生成模块）
+- 代码量估算：约 2500 行（不含注释和文档）
+- 当前可编译运行，输出 Logger、Timer、OnnxBackend、NcnnBackend、ObjectDetector 和 LlamaGenerator 演示日志
 
 ## 目录结构
 
@@ -20,8 +20,9 @@ Inference-Service/
 │   ├── inference_backend.h
 │   ├── onnx_backend.h
 │   └── ncnn_backend.h
-│   └── yolo_postprocess.h
+│   ├── yolo_postprocess.h
 │   └── detector.h
+│   └── llm_generator.h
 ├── src/
 │   ├── main.cpp
 │   ├── utils/
@@ -36,8 +37,9 @@ Inference-Service/
 │   │   └── yolo_postprocess.cpp
 │   ├── detector/
 │   │   └── object_detector.cpp
+│   ├── llm/
+│   │   └── llm_generator.cpp
 │   ├── detector/            # 目标检测器（ObjectDetector）
-│   ├── llm/              （待开发）
 │   ├── pipeline/         （待开发）
 │   └── server/           （待开发）
 ├── docs/
@@ -71,7 +73,9 @@ Inference-Service/
 | `src/postprocess/yolo_postprocess.cpp` | M5 | YOLO 后处理实现（NMS、bbox 解码、置信度过滤、坐标缩放） |
 | `include/detector.h` | M6 | ObjectDetector 类声明（组合后端+预处理+后处理） |
 | `src/detector/object_detector.cpp` | M6 | ObjectDetector 实现（Detect: Letterbox→MatToChw→Predict→ProcessYoloOutput→ScaleDetectionsToOriginal） |
-| `src/main.cpp` | M0+M3+M4+M6 | 主入口（Logger+Timer+OnnxBackend+NcnnBackend+ObjectDetector 演示） |
+| `include/llm_generator.h` | M7 | LlamaGenerator 类声明（PImpl 模式），GenerationConfig 结构体 |
+| `src/llm/llm_generator.cpp` | M7 | LlamaGenerator 实现（PImpl，llama_model_load_from_file + llama_init_from_model + sampler chain + Metal GPU 加速） |
+| `src/main.cpp` | M0+M3+M4+M6+M7 | 主入口（Logger+Timer+OnnxBackend+NcnnBackend+ObjectDetector+LlamaGenerator 演示） |
 
 ## 依赖项
 
@@ -80,7 +84,7 @@ Inference-Service/
 | OpenCV | 4.13.0 (Homebrew) | ✅ 已安装并链接（core, imgproc, imgcodecs） |
 | onnxruntime | 1.26.0 (Homebrew) | ✅ 已安装并链接（via CMake imported target） |
 | ncnn | 20260526 (Homebrew) | ✅ 已安装并链接 |
-| Llama.cpp | - | ❌ 待安装（M7 需要） |
+| Llama.cpp | 9620 (Homebrew) | ✅ 已安装并链接（via CMake config，含 ggml） |
 | cpp-httplib | - | ❌ 待安装（M9 需要） |
 | Google Test | - | ❌ 待安装（M10 需要） |
 | Google Benchmark | - | ❌ 待安装（M11 需要） |
@@ -107,7 +111,7 @@ make
 - [x] M4. NCNN 后端 — 依赖 M2, NCNN ✅ 已完成
 - [x] M5. YOLO 后处理 — 依赖 M1 ✅ 已完成
 - [x] M6. 目标检测器 — 依赖 M2, M5 ✅ 已完成
-- [ ] M7. LLM 文本生成模块 — 依赖 Llama.cpp
+- [x] M7. LLM 文本生成模块 — 依赖 Llama.cpp ✅ 已完成
 - [ ] M8. 批量预处理流水线 — 依赖 M1
 - [ ] M9. REST API 服务 — 依赖 M3/M6/M7, cpp-httplib
 - [ ] M10. 单元测试集 — 依赖所有模块
@@ -140,5 +144,5 @@ make
 
 ## 下一步行动建议
 
-1. **实现 M7：LLM 文本生成模块** — 封装 Llama.cpp，提供 Load 和 Generate 接口
+1. **实现 M8：批量预处理流水线** — 生产者-消费者队列，多线程并行预处理图像
 2. 更新 TASKS.md 和 HANDOVER.md
