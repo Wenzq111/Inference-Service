@@ -203,3 +203,59 @@ if(APPLE AND NOT ncnn_FOUND)
         message(STATUS "Linking Metal frameworks for ncnn Vulkan support")
     endif()
 endif()
+
+# ---- 单元测试（M10）----
+option(BUILD_TESTS "Build unit tests" ON)
+
+if(BUILD_TESTS)
+    enable_testing()
+    find_package(GTest REQUIRED)
+
+    # 公共测试源文件（非测试框架的模块源码）
+    set(TEST_SOURCES
+        src/utils/logger.cpp
+        src/utils/timer.cpp
+        src/preprocess/preprocess.cpp
+        src/backend/onnx_backend.cpp
+        src/backend/ncnn_backend.cpp
+        src/postprocess/yolo_postprocess.cpp
+        src/detector/object_detector.cpp
+        src/llm/llm_generator.cpp
+        src/pipeline/batch_preprocessor.cpp
+        src/server/http_server.cpp
+    )
+
+    # 辅助函数：创建单个测试目标
+    function(add_inference_test test_name)
+        add_executable(${test_name} tests/${test_name}.cpp ${TEST_SOURCES})
+        target_include_directories(${test_name} PRIVATE include)
+        if(ONNXRUNTIME_INCLUDE_DIR)
+            target_include_directories(${test_name} PRIVATE ${ONNXRUNTIME_INCLUDE_DIR})
+        endif()
+        if(NCNN_INCLUDE_DIR)
+            target_include_directories(${test_name} PRIVATE ${NCNN_INCLUDE_DIR})
+        endif()
+        if(LLAMA_INCLUDE_DIR)
+            target_include_directories(${test_name} PRIVATE ${LLAMA_INCLUDE_DIR})
+        endif()
+        target_link_libraries(${test_name}
+            ${OpenCV_LIBS} ${ORT_LINK_TARGET} ${NCNN_LINK_TARGET}
+            ${LLAMA_LINK_TARGET} ${GGML_LINK_TARGET} httplib::httplib
+            GTest::gtest GTest::gtest_main)
+        if(APPLE AND NOT ncnn_FOUND)
+            find_library(METAL_FRAMEWORK_TEST Metal)
+            find_library(FOUNDATION_FRAMEWORK_TEST Foundation)
+            if(METAL_FRAMEWORK_TEST AND FOUNDATION_FRAMEWORK_TEST)
+                target_link_libraries(${test_name} ${METAL_FRAMEWORK_TEST} ${FOUNDATION_FRAMEWORK_TEST})
+            endif()
+        endif()
+        add_test(NAME ${test_name} COMMAND ${test_name})
+    endfunction()
+
+    add_inference_test(test_logger)
+    add_inference_test(test_timer)
+    add_inference_test(test_preprocess)
+    add_inference_test(test_yolo_postprocess)
+    add_inference_test(test_batch_preprocessor)
+    add_inference_test(test_object_detector)
+endif()

@@ -5,8 +5,8 @@
 
 ## 项目整体状态
 
-- 已完成模块：M0（项目骨架）、M1（图像预处理）、M2（推理后端抽象接口）、M3（ONNX Runtime 后端）、M4（NCNN 后端）、M5（YOLO 后处理）、M6（目标检测器）、M7（LLM 文本生成模块）、M8（批量预处理流水线）、M9（REST API 服务）
-- 代码量估算：约 3600 行（不含注释和文档）
+- 已完成模块：M0（项目骨架）、M1（图像预处理）、M2（推理后端抽象接口）、M3（ONNX Runtime 后端）、M4（NCNN 后端）、M5（YOLO 后处理）、M6（目标检测器）、M7（LLM 文本生成模块）、M8（批量预处理流水线）、M9（REST API 服务）、M10（单元测试集）
+- 代码量估算：约 5100 行（不含注释和文档）
 - 当前可编译运行，启动 HTTP 服务监听 8080 端口，提供 /detect、/generate、/health 端点
 
 ## 目录结构
@@ -45,6 +45,13 @@ Inference-Service/
 │   │   └── batch_preprocessor.cpp
 │   ├── server/
 │   │   └── http_server.cpp
+├── tests/
+│   ├── test_logger.cpp
+│   ├── test_timer.cpp
+│   ├── test_preprocess.cpp
+│   ├── test_yolo_postprocess.cpp
+│   ├── test_batch_preprocessor.cpp
+│   └── test_object_detector.cpp
 ├── docs/
 │   ├── AGENTS.md
 │   ├── TASKS.md
@@ -83,6 +90,12 @@ Inference-Service/
 | `include/http_server.h` | M9 | ServerConfig 结构体，RunServer 函数声明 |
 | `src/server/http_server.cpp` | M9 | HTTP 服务实现（cpp-httplib，/detect + /generate + /health，互斥锁保护检测/生成） |
 | `src/main.cpp` | M0+M9 | 主入口（读取环境变量配置 → 调用 RunServer 阻塞运行） |
+| `tests/test_logger.cpp` | M10 | Logger 单元测试（8 个测试用例：级别过滤、空消息、长消息） |
+| `tests/test_timer.cpp` | M10 | Timer 单元测试（12 个测试用例：启停、计时精度、重置） |
+| `tests/test_preprocess.cpp` | M10 | 预处理单元测试（17 个测试用例：MatToChw、ResizeAndNorm、Letterbox） |
+| `tests/test_yolo_postprocess.cpp` | M10 | YOLO 后处理单元测试（25 个测试用例：NMS、坐标缩放、边界裁剪） |
+| `tests/test_batch_preprocessor.cpp` | M10 | 批量预处理单元测试（10 个测试用例：双模式、WaitAll、Stop、回调） |
+| `tests/test_object_detector.cpp` | M10 | 目标检测器单元测试（10 个测试用例：MockBackend、端到端流程） |
 
 ## 依赖项
 
@@ -93,7 +106,7 @@ Inference-Service/
 | ncnn | 20260526 (Homebrew) | ✅ 已安装并链接 |
 | Llama.cpp | 9620 (Homebrew) | ✅ 已安装并链接（via CMake config，含 ggml） |
 | cpp-httplib | v0.18.0 (FetchContent) | ✅ CMake 自动下载并链接 |
-| Google Test | - | ❌ 待安装（M10 需要） |
+| Google Test | 1.17.0 (Homebrew) | ✅ 已安装并链接（via CMake config，-DGTest_ROOT=/opt/homebrew） |
 | Google Benchmark | - | ❌ 待安装（M11 需要） |
 
 ## 构建命令
@@ -121,7 +134,7 @@ make
 - [x] M7. LLM 文本生成模块 — 依赖 Llama.cpp ✅ 已完成
 - [x] M8. 批量预处理流水线 — 依赖 M1 ✅ 已完成
 - [x] M9. REST API 服务 — 依赖 M3/M6/M7, cpp-httplib ✅ 已完成
-- [ ] M10. 单元测试集 — 依赖所有模块
+- [x] M10. 单元测试集 — 依赖所有模块 ✅ 已完成（82 个测试用例，6 个测试文件）
 - [ ] M11. 基准测试 — 依赖 M3, M4, M6
 
 ## 编码约定
@@ -151,4 +164,4 @@ make
 
 ## 下一步行动建议
 
-1. **实现 M10：单元测试集** — 使用 Google Test 为每个模块编写测试
+1. **实现 M11：基准测试** — 使用 Google Benchmark 测试不同后端、批次大小、量化模式的延迟和吞吐量

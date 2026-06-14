@@ -14,7 +14,7 @@
 - [x] M7. LLM 文本生成模块 — 600行 — 依赖 Llama.cpp — 封装 Llama.cpp，提供 Load 和 Generate（支持流式回调）接口，与检测模块独立
 - [x] M8. 批量预处理流水线 — 500行 — 依赖 M1 — 实现生产者-消费者队列，多线程并行预处理图像，支持批次等待和超时
 - [x] M9. REST API 服务 — 500行 — 依赖 M3/M6/M7, cpp-httplib — 实现 HTTP 服务，提供 /detect、/generate、/health 端点，支持并发请求
-- [ ] M10. 单元测试集 — 1500行 — 依赖所有模块 — 使用 Google Test 为每个模块编写单元测试，覆盖主要功能和边界条件
+- [x] M10. 单元测试集 — 1500行 — 依赖所有模块 — 使用 Google Test 为每个模块编写单元测试，覆盖主要功能和边界条件
 - [ ] M11. 基准测试 — 800行 — 依赖 M3, M4, M6 — 使用 Google Benchmark 测试不同后端、批次大小、量化模式的延迟和吞吐量
 
 ## 模块进度
@@ -31,5 +31,5 @@
 | M7 LLM 文本生成模块 | ✅ 完成 | llm_generator.h, llm_generator.cpp |
 | M8 批量预处理流水线 | ✅ 完成 | batch_preprocessor.h, batch_preprocessor.cpp |
 | M9 REST API 服务 | ✅ 完成 | http_server.h, http_server.cpp |
-| M10 单元测试集 | 待开发 | - |
+| M10 单元测试集 | ✅ 完成 | test_logger.cpp, test_timer.cpp, test_preprocess.cpp, test_yolo_postprocess.cpp, test_batch_preprocessor.cpp, test_object_detector.cpp |
 | M11 基准测试 | 待开发 | - |
