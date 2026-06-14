@@ -18,7 +18,7 @@ struct BatchPreprocessor::Impl {
     int target_h_ = 640;
     PreprocessMode mode_ = PreprocessMode::Resize;
     std::vector<float> mean_ = {0.0f, 0.0f, 0.0f};
-    std::vector<float> std_ = {1.0f, 1.0f, 1.0f};
+    std::vector<float> std_ = {255.0f, 255.0f, 255.0f};
     // 预处理参数互斥锁（参数在主线程设置，工作线程读取）
     std::mutex params_mutex_;
 

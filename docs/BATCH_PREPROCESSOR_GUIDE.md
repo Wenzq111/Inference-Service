@@ -157,8 +157,10 @@ void SetPreprocessParams(int target_w, int target_h,
 | `target_w` | 目标宽度 | `ResizeAndNorm(img, target_w, ...)` 或 `Letterbox(img, target_w, ...)` |
 | `target_h` | 目标高度 | `ResizeAndNorm(img, ..., target_h, ...)` 或 `Letterbox(img, ..., target_h)` |
 | `mode` | 预处理模式 | `Resize` → `ResizeAndNorm`；`Letterbox` → `Letterbox` + `MatToChw` |
-| `mean` | 各通道均值 | `ResizeAndNorm(img, ..., mean, ...)` 或 `MatToChw(lb.image, mean, ...)` |
-| `std` | 各通道标准差 | `ResizeAndNorm(img, ..., ..., std)` 或 `MatToChw(lb.image, ..., std)` |
+| `mean` | 各通道均值 | 默认 {0,0,0} | `ResizeAndNorm(img, ..., mean, ...)` 或 `MatToChw(lb.image, mean, ...)` |
+| `std` | 各通道标准差 | 默认 {255,255,255}，输出范围 [0,1] | `ResizeAndNorm(img, ..., ..., std)` 或 `MatToChw(lb.image, ..., std)` |
+
+**默认值说明**：`mean={0,0,0}` + `std={255,255,255}` 将像素值归一化到 **[0, 1]** 范围，这是 YOLO 等检测模型的标准预处理，也与 M6 ObjectDetector 的默认参数一致。ImageNet 分类模型需手动设置为 `{123.675, 116.28, 103.53}` / `{58.395, 57.12, 57.375}`。
 
 **线程安全**：通过 `params_mutex_` 保护，防止设置参数与工作线程读取竞争。
 

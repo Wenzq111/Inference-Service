@@ -67,7 +67,7 @@ public:
     void SetPreprocessParams(int target_w, int target_h,
                              PreprocessMode mode = PreprocessMode::Resize,
                              const std::vector<float>& mean = {0.0f, 0.0f, 0.0f},
-                             const std::vector<float>& std = {1.0f, 1.0f, 1.0f});
+                             const std::vector<float>& std = {255.0f, 255.0f, 255.0f});
 
     // 设置完成回调（每完成一张图像的处理即调用）
     void SetCallback(PreprocessCallback callback);
