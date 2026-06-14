@@ -215,6 +215,12 @@ std::string LlamaGenerator::Generate(const std::string& prompt,
         return "";
     }
 
+    // 清空 KV Cache，确保每次 Generate 调用从干净状态开始
+    // 不清空时，上一次生成的 token 仍留在 KV Cache 中，导致 llama_decode 报
+    // "inconsistent sequence positions" 错误（新 prompt 从 pos=0 开始但 Cache 中有旧数据）
+    // llama.cpp 9620 API: llama_get_memory 获取内存对象，llama_memory_clear(data=true) 清空所有序列数据
+    llama_memory_clear(llama_get_memory(pImpl_->ctx), true);
+
     Timer timer;
     timer.Start();
 
@@ -330,6 +336,9 @@ void LlamaGenerator::GenerateStream(const std::string& prompt,
         Logger::Error("LlamaGenerator::GenerateStream: callback is null");
         return;
     }
+
+    // 清空 KV Cache，确保每次 GenerateStream 调用从干净状态开始
+    llama_memory_clear(llama_get_memory(pImpl_->ctx), true);
 
     Timer timer;
     timer.Start();

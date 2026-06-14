@@ -207,10 +207,50 @@ DETECTOR_MODEL=/data/models/yolov5s.onnx LLM_MODEL=/data/models/qwen.gguf ./buil
 
 将模型文件放置在 `models/` 目录下：
 
-- `models/yolov5s.onnx` — YOLOv5 目标检测模型（ONNX 格式）
+- `models/yolov5s.onnx` — YOLOv5s 目标检测模型（ONNX 格式，**必须为 float32 输入类型**）
 - `models/llama.gguf` — LLM 文本生成模型（GGUF 格式）
 
-模型文件不纳入版本控制，需自行下载。
+模型文件不纳入版本控制，需自行下载或导出。
+
+### 获取 YOLOv5s float32 ONNX 模型
+
+> **注意**：GitHub releases 上的 `yolov5s.onnx` 为 float16 输入类型，与本项目不兼容（ONNX Runtime 后端要求 float32 输入）。请按以下方式导出 float32 版本：
+
+```bash
+# 1. 安装依赖
+pip install torch onnx onnxruntime onnxslim
+
+# 2. 克隆 YOLOv5 仓库
+git clone https://github.com/ultralytics/yolov5.git
+cd yolov5
+
+# 3. 下载 PyTorch 权重并导出 float32 ONNX
+python export.py --weights yolov5s.pt --include onnx --simplify --opset 12
+
+# 4. 将导出的模型复制到项目目录
+cp yolov5s.onnx /path/to/Inference-Service/models/yolov5s.onnx
+```
+
+导出完成后可验证输入类型：
+
+```python
+from onnx import load
+model = load('models/yolov5s.onnx')
+for inp in model.graph.input:
+    # elem_type=1 表示 float32，elem_type=10 表示 float16（不兼容）
+    print(f'{inp.name}: type={inp.type.tensor_type.elem_type}')
+```
+
+### 获取 LLM 模型
+
+推荐使用 [TinyLlama 1.1B Chat](https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF)（Q4_K_M 量化，约 638MB）：
+
+```bash
+# 从 HuggingFace 下载
+wget -O models/llama.gguf "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
+```
+
+也可使用其他 GGUF 格式模型，通过环境变量 `LLM_MODEL` 指定路径。
 
 ## 文档
 
