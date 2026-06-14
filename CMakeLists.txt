@@ -4,6 +4,15 @@ project(Inference-Service VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# ---- 下载 cpp-httplib ----
+include(FetchContent)
+FetchContent_Declare(
+    httplib
+    GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
+    GIT_TAG v0.18.0
+)
+FetchContent_MakeAvailable(httplib)
+
 find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs)
 
 # ---- 查找 onnxruntime：优先 CMake config，失败则手动搜索 ----
@@ -163,6 +172,7 @@ add_executable(inference_service
     src/detector/object_detector.cpp
     src/llm/llm_generator.cpp
     src/pipeline/batch_preprocessor.cpp
+    src/server/http_server.cpp
 )
 
 target_include_directories(inference_service PRIVATE include)
@@ -182,7 +192,7 @@ if(LLAMA_INCLUDE_DIR)
     target_include_directories(inference_service PRIVATE ${LLAMA_INCLUDE_DIR})
 endif()
 
-target_link_libraries(inference_service ${OpenCV_LIBS} ${ORT_LINK_TARGET} ${NCNN_LINK_TARGET} ${LLAMA_LINK_TARGET} ${GGML_LINK_TARGET})
+target_link_libraries(inference_service ${OpenCV_LIBS} ${ORT_LINK_TARGET} ${NCNN_LINK_TARGET} ${LLAMA_LINK_TARGET} ${GGML_LINK_TARGET} httplib::httplib)
 
 # macOS 上 ncnn Vulkan 依赖 Metal 框架，手动搜索模式下可能需要显式链接
 if(APPLE AND NOT ncnn_FOUND)

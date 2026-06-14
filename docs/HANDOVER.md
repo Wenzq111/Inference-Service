@@ -5,9 +5,9 @@
 
 ## 项目整体状态
 
-- 已完成模块：M0（项目骨架）、M1（图像预处理）、M2（推理后端抽象接口）、M3（ONNX Runtime 后端）、M4（NCNN 后端）、M5（YOLO 后处理）、M6（目标检测器）、M7（LLM 文本生成模块）、M8（批量预处理流水线）
-- 代码量估算：约 3000 行（不含注释和文档）
-- 当前可编译运行，输出 Logger、Timer、OnnxBackend、NcnnBackend、ObjectDetector、LlamaGenerator 和 BatchPreprocessor 演示日志
+- 已完成模块：M0（项目骨架）、M1（图像预处理）、M2（推理后端抽象接口）、M3（ONNX Runtime 后端）、M4（NCNN 后端）、M5（YOLO 后处理）、M6（目标检测器）、M7（LLM 文本生成模块）、M8（批量预处理流水线）、M9（REST API 服务）
+- 代码量估算：约 3600 行（不含注释和文档）
+- 当前可编译运行，启动 HTTP 服务监听 8080 端口，提供 /detect、/generate、/health 端点
 
 ## 目录结构
 
@@ -24,6 +24,7 @@ Inference-Service/
 │   └── detector.h
 │   ├── llm_generator.h
 │   └── batch_preprocessor.h
+│   └── http_server.h
 ├── src/
 │   ├── main.cpp
 │   ├── utils/
@@ -42,9 +43,8 @@ Inference-Service/
 │   │   └── llm_generator.cpp
 │   ├── pipeline/
 │   │   └── batch_preprocessor.cpp
-│   ├── detector/            # 目标检测器（ObjectDetector）
-│   ├── pipeline/         （待开发）
-│   └── server/           （待开发）
+│   ├── server/
+│   │   └── http_server.cpp
 ├── docs/
 │   ├── AGENTS.md
 │   ├── TASKS.md
@@ -78,9 +78,11 @@ Inference-Service/
 | `src/detector/object_detector.cpp` | M6 | ObjectDetector 实现（Detect: Letterbox→MatToChw→Predict→ProcessYoloOutput→ScaleDetectionsToOriginal） |
 | `include/llm_generator.h` | M7 | LlamaGenerator 类声明（PImpl 模式），GenerationConfig 结构体 |
 | `src/llm/llm_generator.cpp` | M7 | LlamaGenerator 实现（PImpl，llama_model_load_from_file + llama_init_from_model + sampler chain + Metal GPU 加速） |
-| `include/batch_preprocessor.h` | M8 | BatchPreprocessor 类声明（PImpl 模式），PreprocessResult/PreprocessCallback 类型别名 |
-| `src/pipeline/batch_preprocessor.cpp` | M8 | BatchPreprocessor 实现（PImpl，线程池 + 任务队列 + condition_variable + ResizeAndNorm） |
-| `src/main.cpp` | M0+M3+M4+M6+M7+M8 | 主入口（Logger+Timer+OnnxBackend+NcnnBackend+ObjectDetector+LlamaGenerator+BatchPreprocessor 演示） |
+| `include/batch_preprocessor.h` | M8 | BatchPreprocessor 类声明（PImpl 模式），PreprocessMode 枚举，PreprocessResult/PreprocessCallback 类型 |
+| `src/pipeline/batch_preprocessor.cpp` | M8 | BatchPreprocessor 实现（PImpl，线程池 + 任务队列 + condition_variable + Resize/Letterbox 双模式） |
+| `include/http_server.h` | M9 | ServerConfig 结构体，RunServer 函数声明 |
+| `src/server/http_server.cpp` | M9 | HTTP 服务实现（cpp-httplib，/detect + /generate + /health，互斥锁保护检测/生成） |
+| `src/main.cpp` | M0+M9 | 主入口（读取环境变量配置 → 调用 RunServer 阻塞运行） |
 
 ## 依赖项
 
@@ -90,7 +92,7 @@ Inference-Service/
 | onnxruntime | 1.26.0 (Homebrew) | ✅ 已安装并链接（via CMake imported target） |
 | ncnn | 20260526 (Homebrew) | ✅ 已安装并链接 |
 | Llama.cpp | 9620 (Homebrew) | ✅ 已安装并链接（via CMake config，含 ggml） |
-| cpp-httplib | - | ❌ 待安装（M9 需要） |
+| cpp-httplib | v0.18.0 (FetchContent) | ✅ CMake 自动下载并链接 |
 | Google Test | - | ❌ 待安装（M10 需要） |
 | Google Benchmark | - | ❌ 待安装（M11 需要） |
 
@@ -118,8 +120,7 @@ make
 - [x] M6. 目标检测器 — 依赖 M2, M5 ✅ 已完成
 - [x] M7. LLM 文本生成模块 — 依赖 Llama.cpp ✅ 已完成
 - [x] M8. 批量预处理流水线 — 依赖 M1 ✅ 已完成
-- [ ] M8. 批量预处理流水线 — 依赖 M1
-- [ ] M9. REST API 服务 — 依赖 M3/M6/M7, cpp-httplib
+- [x] M9. REST API 服务 — 依赖 M3/M6/M7, cpp-httplib ✅ 已完成
 - [ ] M10. 单元测试集 — 依赖所有模块
 - [ ] M11. 基准测试 — 依赖 M3, M4, M6
 
@@ -150,4 +151,4 @@ make
 
 ## 下一步行动建议
 
-1. **实现 M9：REST API 服务** — 依赖 M3/M6/M7, cpp-httplib，实现 HTTP 推理服务
+1. **实现 M10：单元测试集** — 使用 Google Test 为每个模块编写测试
