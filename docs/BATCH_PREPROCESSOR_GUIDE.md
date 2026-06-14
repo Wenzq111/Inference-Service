@@ -4,7 +4,7 @@
 
 ## 概述
 
-M8 实现了异步批量图像预处理能力，通过**线程池 + 生产者-消费者队列**模型，让多张图像的预处理在多个工作线程中并行执行，提高整体吞吐量。M8 只依赖 M1 的预处理函数，不依赖推理后端。
+M8 实现了异步批量图像预处理能力，通过**线程池 + 生产者-消费者队列**模型，让多张图像的预处理在多个工作线程中并行执行，提高整体吞吐量。M8 支持 **Resize**（直接缩放）和 **Letterbox**（保持宽高比）两种预处理模式，依赖 M1 的预处理函数，不依赖推理后端。
 
 ### 为什么需要 M8
 
@@ -28,23 +28,47 @@ M8 将这些任务分发到 4 个工作线程并行执行：
 
 ## 类与类型定义
 
+### PreprocessMode
+
+```cpp
+enum class PreprocessMode {
+    Resize,      // 直接缩放到目标尺寸（拉伸，不保持宽高比）
+    Letterbox    // 保持宽高比缩放，不足部分填充灰色
+};
+```
+
+预处理模式枚举，决定工作线程中调用哪种 M1 预处理函数：
+
+| 模式 | 内部调用 | 适用场景 |
+|---|---|---|
+| `Resize` | `ResizeAndNorm` | 图像分类等对宽高比不敏感的任务 |
+| `Letterbox` | `Letterbox` + `MatToChw` | YOLO 目标检测等需要保持宽高比的任务 |
+
 ### PreprocessResult
 
 ```cpp
-using PreprocessResult = std::vector<float>;
+struct PreprocessResult {
+    std::vector<float> tensor;  // CHW 顺序的浮点张量（已归一化），失败时为空
+    float scale = 0.0f;         // Letterbox 缩放比例（Resize 模式下为 0.0f）
+    int x_offset = 0;           // Letterbox x 偏移量（Resize 模式下为 0）
+    int y_offset = 0;           // Letterbox y 偏移量（Resize 模式下为 0）
+};
 ```
 
-预处理结果的类型别名，即 CHW 顺序、已归一化的浮点张量。与 M1 的 `ResizeAndNorm` 返回值类型一致。当预处理失败时为空向量。
+预处理结果结构体，包含浮点张量和 Letterbox 元数据：
+
+- `tensor`：CHW 顺序、已归一化的浮点张量，与 M1 的 `ResizeAndNorm` / `MatToChw` 返回值类型一致。预处理失败时为空向量
+- `scale`、`x_offset`、`y_offset`：Letterbox 模式下的坐标映射参数，用于将检测框从模型输入尺寸映射回原图（与 M1 的 `LetterboxResult` 对应）。Resize 模式下这些字段为默认值 0
 
 ### PreprocessCallback
 
 ```cpp
-using PreprocessCallback = std::function<void(size_t index, const PreprocessResult& tensor)>;
+using PreprocessCallback = std::function<void(size_t index, const PreprocessResult& result)>;
 ```
 
 完成回调类型。每个图像预处理完成后被调用：
 - `index`：用户提交时指定的标识，用于区分不同图像
-- `tensor`：预处理结果，失败时为空
+- `result`：预处理结果，包含 tensor 和 Letterbox 元数据；失败时 `result.tensor` 为空
 
 ### BatchPreprocessor
 
@@ -87,7 +111,7 @@ bool Submit(size_t index, const cv::Mat& img);
 - `img`：BGR 格式的 cv::Mat（浅拷贝，引用计数安全）
 - 返回 `true`：成功入队；`false`：已调用 Stop()，拒绝提交
 
-**与 M1 的关系**：入队时不执行预处理，仅保存图像引用。预处理在工作线程中调用 M1 的 `ResizeAndNorm`。
+**与 M1 的关系**：入队时不执行预处理，仅保存图像引用。预处理在工作线程中根据 `PreprocessMode` 调用 M1 的 `ResizeAndNorm` 或 `Letterbox+MatToChw`。
 
 ### Submit（文件路径版本）
 
@@ -95,9 +119,9 @@ bool Submit(size_t index, const cv::Mat& img);
 bool Submit(size_t index, const std::string& image_path);
 ```
 
-提交一张图像文件路径进行异步预处理。工作线程中通过 `cv::imread` 读取，再调用 `ResizeAndNorm`。
+提交一张图像文件路径进行异步预处理。工作线程中通过 `cv::imread` 读取，再根据 `PreprocessMode` 调用对应的预处理函数。
 
-- 读取失败时回调中 tensor 为空，并记录 `Logger::Error`
+- 读取失败时回调中 `result.tensor` 为空，并记录 `Logger::Error`
 
 ### WaitAll
 
@@ -121,18 +145,20 @@ bp.WaitAll();  // 阻塞直到 3 张图都处理完
 
 ```cpp
 void SetPreprocessParams(int target_w, int target_h,
+                         PreprocessMode mode = PreprocessMode::Resize,
                          const std::vector<float>& mean = {0.0f, 0.0f, 0.0f},
                          const std::vector<float>& std = {1.0f, 1.0f, 1.0f});
 ```
 
-设置预处理参数，与 M1 的 `ResizeAndNorm` 参数一一对应：
+设置预处理参数：
 
-| 参数 | 作用 | 对应 M1 参数 |
+| 参数 | 作用 | 对应 M1 调用 |
 |---|---|---|
-| `target_w` | 目标宽度 | `ResizeAndNorm(img, target_w, ...)` |
-| `target_h` | 目标高度 | `ResizeAndNorm(img, ..., target_h, ...)` |
-| `mean` | 各通道均值 | `ResizeAndNorm(img, ..., mean, ...)` |
-| `std` | 各通道标准差 | `ResizeAndNorm(img, ..., ..., std)` |
+| `target_w` | 目标宽度 | `ResizeAndNorm(img, target_w, ...)` 或 `Letterbox(img, target_w, ...)` |
+| `target_h` | 目标高度 | `ResizeAndNorm(img, ..., target_h, ...)` 或 `Letterbox(img, ..., target_h)` |
+| `mode` | 预处理模式 | `Resize` → `ResizeAndNorm`；`Letterbox` → `Letterbox` + `MatToChw` |
+| `mean` | 各通道均值 | `ResizeAndNorm(img, ..., mean, ...)` 或 `MatToChw(lb.image, mean, ...)` |
+| `std` | 各通道标准差 | `ResizeAndNorm(img, ..., ..., std)` 或 `MatToChw(lb.image, ..., std)` |
 
 **线程安全**：通过 `params_mutex_` 保护，防止设置参数与工作线程读取竞争。
 
@@ -169,7 +195,7 @@ void Stop();
 ```
 BatchPreprocessor
     └── Impl
-        ├── target_w_, target_h_, mean_, std_  ← 预处理参数
+        ├── target_w_, target_h_, mode_, mean_, std_  ← 预处理参数
         ├── params_mutex_                       ← 参数读写锁
         ├── callback_                           ← 完成回调
         ├── callback_mutex_                     ← 回调读写锁
@@ -190,9 +216,12 @@ while (true) {
        条件: 队列非空 || stopped
     2. stopped 且队列为空 → 退出线程
     3. 取出一个 Task，解锁
-    4. 读取预处理参数（加 params_mutex_）
+    4. 读取预处理参数（加 params_mutex_），含 mode
     5. 若 use_path → cv::imread 读取图像
-    6. 调用 ResizeAndNorm(img, tw, th, mean, std)
+    6. 根据 mode 执行预处理:
+       - Resize 模式:  ResizeAndNorm(img, tw, th, mean, std)
+       - Letterbox 模式: Letterbox(img, tw, th) → MatToChw(lb.image, mean, std)
+                         填充 result.scale/x_offset/y_offset
     7. 调用 callback_(index, result)
     8. pending_count_-- → done_cv_.notify_all()
 }
@@ -215,8 +244,9 @@ while (true) {
 ```
 M0 Logger ───────────→ M8 日志输出
 M0 Timer ────────────→ (可选，M8 演示中可统计耗时)
-M1 ResizeAndNorm ────→ M8 核心预处理逻辑（Worker 中调用）
-M1 MatToChw ─────────→ M8 间接使用（ResizeAndNorm 内部调用）
+M1 ResizeAndNorm ────→ M8 Resize 模式的核心预处理逻辑（Worker 中调用）
+M1 Letterbox ────────→ M8 Letterbox 模式中保持宽高比缩放
+M1 MatToChw ─────────→ M8 Letterbox 模式中 BGR→RGB + 归一化 + CHW 转换（也可被 ResizeAndNorm 间接调用）
 
 M8 不依赖:
   M2 InferenceBackend  ← M8 只做预处理，不做推理
@@ -234,35 +264,58 @@ M8 不依赖:
               ↑ 并行预处理                    ↑ 串行/批量推理              ↑ NMS/解码
 ```
 
-M8 的输出（`PreprocessResult`）可直接作为 `InferenceBackend::Predict()` 的输入，实现**预处理-推理-后处理**的完整流水线。
+M8 的输出（`PreprocessResult.tensor`）可直接作为 `InferenceBackend::Predict()` 的输入；Letterbox 模式下的 `scale/x_offset/y_offset` 可传给 M5 的 `ScaleDetectionsToOriginal`，实现**预处理-推理-后处理**的完整流水线。
 
 ---
 
 ## 使用示例
 
+### Resize 模式（图像分类等场景）
+
 ```cpp
-// 创建 4 线程预处理器
 inference::BatchPreprocessor bp(4);
 
-// 设置预处理参数（与 ResizeAndNorm 一致）
-bp.SetPreprocessParams(640, 640, {0,0,0}, {255,255,255});
+// 设置 Resize 模式预处理参数
+bp.SetPreprocessParams(640, 640, inference::PreprocessMode::Resize,
+                       {0.0f, 0.0f, 0.0f}, {255.0f, 255.0f, 255.0f});
 
-// 设置回调
-bp.SetCallback([](size_t idx, const inference::PreprocessResult& tensor) {
-    if (tensor.empty()) {
+bp.SetCallback([](size_t idx, const inference::PreprocessResult& result) {
+    if (result.tensor.empty()) {
         // 预处理失败
     } else {
-        // tensor 大小 = 3 * 640 * 640 = 1228800
+        // result.tensor 大小 = 3 * 640 * 640 = 1228800
+        // result.scale = 0.0f, x_offset = 0, y_offset = 0（Resize 模式无坐标映射）
         // 可送入 InferenceBackend::Predict()
     }
 });
 
-// 提交任务
+bp.Submit(0, "images/cat.jpg");
+bp.Submit(1, "images/dog.jpg");
+bp.WaitAll();
+```
+
+### Letterbox 模式（YOLO 目标检测等场景）
+
+```cpp
+inference::BatchPreprocessor bp(4);
+
+// 设置 Letterbox 模式预处理参数
+bp.SetPreprocessParams(640, 640, inference::PreprocessMode::Letterbox,
+                       {0.0f, 0.0f, 0.0f}, {255.0f, 255.0f, 255.0f});
+
+bp.SetCallback([](size_t idx, const inference::PreprocessResult& result) {
+    if (result.tensor.empty()) {
+        // 预处理失败
+    } else {
+        // result.tensor 大小 = 3 * 640 * 640 = 1228800
+        // result.scale / x_offset / y_offset 可传给 ScaleDetectionsToOriginal
+        // 将检测框坐标从 640×640 映射回原图
+    }
+});
+
 bp.Submit(0, "images/cat.jpg");
 bp.Submit(1, "images/dog.jpg");
 cv::Mat img = cv::imread("images/bird.jpg");
 bp.Submit(2, img);
-
-// 等待全部完成
 bp.WaitAll();
 ```
