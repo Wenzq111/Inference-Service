@@ -50,3 +50,6 @@ env/
 
 # Jupyter Notebook
 .ipynb_checkpoints/
+
+# Model files and test images (large binary files)
+models/
