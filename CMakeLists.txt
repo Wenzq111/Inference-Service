@@ -162,6 +162,7 @@ add_executable(inference_service
     src/postprocess/yolo_postprocess.cpp
     src/detector/object_detector.cpp
     src/llm/llm_generator.cpp
+    src/pipeline/batch_preprocessor.cpp
 )
 
 target_include_directories(inference_service PRIVATE include)

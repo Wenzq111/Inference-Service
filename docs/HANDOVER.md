@@ -5,9 +5,9 @@
 
 ## 项目整体状态
 
-- 已完成模块：M0（项目骨架）、M1（图像预处理）、M2（推理后端抽象接口）、M3（ONNX Runtime 后端）、M4（NCNN 后端）、M5（YOLO 后处理）、M6（目标检测器）、M7（LLM 文本生成模块）
-- 代码量估算：约 2500 行（不含注释和文档）
-- 当前可编译运行，输出 Logger、Timer、OnnxBackend、NcnnBackend、ObjectDetector 和 LlamaGenerator 演示日志
+- 已完成模块：M0（项目骨架）、M1（图像预处理）、M2（推理后端抽象接口）、M3（ONNX Runtime 后端）、M4（NCNN 后端）、M5（YOLO 后处理）、M6（目标检测器）、M7（LLM 文本生成模块）、M8（批量预处理流水线）
+- 代码量估算：约 3000 行（不含注释和文档）
+- 当前可编译运行，输出 Logger、Timer、OnnxBackend、NcnnBackend、ObjectDetector、LlamaGenerator 和 BatchPreprocessor 演示日志
 
 ## 目录结构
 
@@ -22,7 +22,8 @@ Inference-Service/
 │   └── ncnn_backend.h
 │   ├── yolo_postprocess.h
 │   └── detector.h
-│   └── llm_generator.h
+│   ├── llm_generator.h
+│   └── batch_preprocessor.h
 ├── src/
 │   ├── main.cpp
 │   ├── utils/
@@ -39,6 +40,8 @@ Inference-Service/
 │   │   └── object_detector.cpp
 │   ├── llm/
 │   │   └── llm_generator.cpp
+│   ├── pipeline/
+│   │   └── batch_preprocessor.cpp
 │   ├── detector/            # 目标检测器（ObjectDetector）
 │   ├── pipeline/         （待开发）
 │   └── server/           （待开发）
@@ -75,7 +78,9 @@ Inference-Service/
 | `src/detector/object_detector.cpp` | M6 | ObjectDetector 实现（Detect: Letterbox→MatToChw→Predict→ProcessYoloOutput→ScaleDetectionsToOriginal） |
 | `include/llm_generator.h` | M7 | LlamaGenerator 类声明（PImpl 模式），GenerationConfig 结构体 |
 | `src/llm/llm_generator.cpp` | M7 | LlamaGenerator 实现（PImpl，llama_model_load_from_file + llama_init_from_model + sampler chain + Metal GPU 加速） |
-| `src/main.cpp` | M0+M3+M4+M6+M7 | 主入口（Logger+Timer+OnnxBackend+NcnnBackend+ObjectDetector+LlamaGenerator 演示） |
+| `include/batch_preprocessor.h` | M8 | BatchPreprocessor 类声明（PImpl 模式），PreprocessResult/PreprocessCallback 类型别名 |
+| `src/pipeline/batch_preprocessor.cpp` | M8 | BatchPreprocessor 实现（PImpl，线程池 + 任务队列 + condition_variable + ResizeAndNorm） |
+| `src/main.cpp` | M0+M3+M4+M6+M7+M8 | 主入口（Logger+Timer+OnnxBackend+NcnnBackend+ObjectDetector+LlamaGenerator+BatchPreprocessor 演示） |
 
 ## 依赖项
 
@@ -112,6 +117,7 @@ make
 - [x] M5. YOLO 后处理 — 依赖 M1 ✅ 已完成
 - [x] M6. 目标检测器 — 依赖 M2, M5 ✅ 已完成
 - [x] M7. LLM 文本生成模块 — 依赖 Llama.cpp ✅ 已完成
+- [x] M8. 批量预处理流水线 — 依赖 M1 ✅ 已完成
 - [ ] M8. 批量预处理流水线 — 依赖 M1
 - [ ] M9. REST API 服务 — 依赖 M3/M6/M7, cpp-httplib
 - [ ] M10. 单元测试集 — 依赖所有模块
@@ -144,5 +150,4 @@ make
 
 ## 下一步行动建议
 
-1. **实现 M8：批量预处理流水线** — 生产者-消费者队列，多线程并行预处理图像
-2. 更新 TASKS.md 和 HANDOVER.md
+1. **实现 M9：REST API 服务** — 依赖 M3/M6/M7, cpp-httplib，实现 HTTP 推理服务

@@ -4,6 +4,7 @@
 #include "ncnn_backend.h"
 #include "detector.h"
 #include "llm_generator.h"
+#include "batch_preprocessor.h"
 
 #include <memory>
 #include <thread>
@@ -81,6 +82,43 @@ int main() {
     } else {
         Logger::Warning("Failed to load LLM model, LLM demo skipped");
     }
+
+    // M8: 批量异步预处理演示 — Resize 模式
+    BatchPreprocessor bp_resize(4);
+    bp_resize.SetPreprocessParams(640, 640, PreprocessMode::Resize,
+                                  {0.0f, 0.0f, 0.0f}, {255.0f, 255.0f, 255.0f});
+    bp_resize.SetCallback([](size_t idx, const PreprocessResult& result) {
+        if (result.tensor.empty()) {
+            Logger::Error("BatchPreprocessor(Resize): failed index " + std::to_string(idx));
+        } else {
+            Logger::Info("BatchPreprocessor(Resize): done index " + std::to_string(idx) +
+                         ", tensor_size=" + std::to_string(result.tensor.size()));
+        }
+    });
+    bp_resize.Submit(0, "models/test.jpg");
+    bp_resize.Submit(1, "models/test2.jpg");
+    bp_resize.WaitAll();
+    Logger::Info("BatchPreprocessor(Resize): all tasks completed");
+
+    // M8: 批量异步预处理演示 — Letterbox 模式
+    BatchPreprocessor bp_letterbox(4);
+    bp_letterbox.SetPreprocessParams(640, 640, PreprocessMode::Letterbox,
+                                     {0.0f, 0.0f, 0.0f}, {255.0f, 255.0f, 255.0f});
+    bp_letterbox.SetCallback([](size_t idx, const PreprocessResult& result) {
+        if (result.tensor.empty()) {
+            Logger::Error("BatchPreprocessor(Letterbox): failed index " + std::to_string(idx));
+        } else {
+            Logger::Info("BatchPreprocessor(Letterbox): done index " + std::to_string(idx) +
+                         ", tensor_size=" + std::to_string(result.tensor.size()) +
+                         ", scale=" + std::to_string(result.scale) +
+                         ", x_offset=" + std::to_string(result.x_offset) +
+                         ", y_offset=" + std::to_string(result.y_offset));
+        }
+    });
+    bp_letterbox.Submit(0, "models/test.jpg");
+    bp_letterbox.Submit(1, "models/test2.jpg");
+    bp_letterbox.WaitAll();
+    Logger::Info("BatchPreprocessor(Letterbox): all tasks completed");
 
     return 0;
 }
