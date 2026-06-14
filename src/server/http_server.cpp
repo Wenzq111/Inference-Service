@@ -124,6 +124,30 @@ void RunServer(const ServerConfig& config) {
     // 创建 HTTP 服务
     httplib::Server svr;
 
+    // GET / API 说明页面
+    svr.Get("/", [](const httplib::Request&, httplib::Response& res) {
+        res.set_content(
+            "<html><head><title>Inference Service API</title></head><body>"
+            "<h1>Inference Service API</h1>"
+            "<h2>Endpoints</h2>"
+            "<h3>GET /health</h3>"
+            "<p>Health check. Response: <code>{\"status\":\"ok\"}</code></p>"
+            "<h3>POST /detect</h3>"
+            "<p>Object detection. Upload image via multipart/form-data field <code>image</code>.</p>"
+            "<p>Query params: <code>confidence</code> (float, default 0.25), "
+            "<code>nms_threshold</code> (float, default 0.45)</p>"
+            "<p>Example: <code>curl -X POST -F \"image=@test.jpg\" http://localhost:8080/detect</code></p>"
+            "<h3>POST /generate</h3>"
+            "<p>Text generation. Send JSON with <code>prompt</code> (required), "
+            "<code>max_tokens</code> (int, default 512), "
+            "<code>temperature</code> (float, default 0.8), "
+            "<code>top_p</code> (float, default 0.95)</p>"
+            "<p>Example: <code>curl -X POST -H \"Content-Type: application/json\" "
+            "-d '{\"prompt\":\"Hello\"}' http://localhost:8080/generate</code></p>"
+            "</body></html>",
+            "text/html");
+    });
+
     // GET /health 健康检查
     svr.Get("/health", [](const httplib::Request&, httplib::Response& res) {
         res.set_content("{\"status\":\"ok\"}", "application/json");
