@@ -42,6 +42,10 @@ public:
     // 返回模型输出张量形状列表，首次 Predict 后缓存，此前为空
     std::vector<std::vector<int64_t>> GetOutputShapes() const override;
 
+    // 设置模型输入尺寸，用于 NCNN 模型未包含 shape 信息时的回退
+    // width: 输入宽度（默认 640），height: 输入高度（默认 640），channels: 通道数（默认 3）
+    void SetInputSize(int width, int height, int channels = 3);
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

@@ -6,6 +6,7 @@
 #include <gpu.h>
 
 #include <filesystem>
+#include <cmath>
 #include <stdexcept>
 
 namespace inference {
@@ -29,6 +30,11 @@ struct NcnnBackend::Impl {
     bool model_loaded = false;
     // 标记是否启用了 Vulkan GPU 加速，析构时用于判断是否需要销毁 GPU 实例
     bool vulkan_enabled = false;
+
+    // 模型输入尺寸回退值，当 NCNN 模型 .param 未包含 shape 信息时使用
+    int fallback_input_width = 640;
+    int fallback_input_height = 640;
+    int fallback_input_channels = 3;
 
     // 根据输入路径推导 .param 和 .bin 的完整路径
     // 若 path 以 .param 结尾，则直接使用，.bin 替换后缀
@@ -112,16 +118,18 @@ bool NcnnBackend::LoadModel(const std::string& model_path) {
     impl_->net.opt.use_fp16_arithmetic = true;
     impl_->net.opt.use_packing_layout = true;
 
-    // Vulkan GPU 加速：自动检测，不使用 CMake 选项
-    // 先检查可用 GPU 数量，为 0 则跳过 GPU 初始化
-    if (ncnn::get_gpu_count() > 0) {
+    // Vulkan GPU 加速：macOS 上 Vulkan 内存分配不稳定，暂时禁用
+    // Linux 上可通过环境变量 NCNN_VULKAN=1 启用
+    const char* env_vulkan = std::getenv("NCNN_VULKAN");
+    if (env_vulkan && std::string(env_vulkan) == "1" &&
+        ncnn::get_gpu_count() > 0) {
         ncnn::create_gpu_instance();
         impl_->net.opt.use_vulkan_compute = true;
         impl_->net.set_vulkan_device(ncnn::get_default_gpu_index());
         impl_->vulkan_enabled = true;
         Logger::Info("NcnnBackend::LoadModel: Vulkan GPU acceleration enabled");
     } else {
-        Logger::Info("NcnnBackend::LoadModel: no Vulkan GPU found, using CPU");
+        Logger::Info("NcnnBackend::LoadModel: using CPU (Vulkan disabled by default)");
     }
 
     // 加载模型参数（网络结构），返回 0 表示成功
@@ -254,8 +262,17 @@ std::vector<std::vector<float>> NcnnBackend::Predict(
                                 static_cast<int>(shape[1]),
                                 const_cast<float*>(data.data()));
             } else {
-                // 一维或未知形状 → ncnn::Mat(w, data)
-                mat = ncnn::Mat(static_cast<int>(data.size()),
+                // 形状未知时，使用 fallback 输入尺寸构造 3D Mat
+                // 典型场景：nihui/ncnn-assets 的 YOLOv5s 模型输入 in0 无 shape 信息
+                int c = impl_->fallback_input_channels;
+                int h = impl_->fallback_input_height;
+                int w = impl_->fallback_input_width;
+                Logger::Warning(
+                    "NcnnBackend::Predict: input '" + impl_->input_names[i] +
+                    "' has unknown shape, using fallback " +
+                    std::to_string(w) + "x" + std::to_string(h) + "x" +
+                    std::to_string(c));
+                mat = ncnn::Mat(w, h, c,
                                 const_cast<float*>(data.data()));
             }
 
@@ -306,6 +323,105 @@ std::vector<std::vector<float>> NcnnBackend::Predict(
             results.push_back(std::move(output_data));
         }
 
+        // NCNN YOLOv5 多头输出解码拼接：
+        // nihui/ncnn-assets 的 YOLOv5s 有 3 个输出头 out0/out1/out2
+        // 每个输出头 NCNN Mat shape: {255, H, W}（dims=3），其中 255 = 3*(80+5) = 3*85
+        // NCNN 模型输出的是 raw logits（无 sigmoid、无坐标解码），
+        // 需要执行完整的 YOLOv5 解码后拼接为 [25200, 85] 格式，与 ONNX 输出一致
+        // 使用 output_names 数量判断是否为多头输出
+        if (results.size() == 3 && impl_->output_names.size() == 3) {
+            // 每个头的原始 NCNN 输出大小 = 255 * H * W
+            // YOLOv5s 三个检测头空间尺寸: 80x80, 40x40, 20x20
+            std::vector<int> head_sizes = {255 * 80 * 80, 255 * 40 * 40, 255 * 20 * 20};
+            bool is_yolo_multihead = true;
+            for (size_t i = 0; i < results.size(); ++i) {
+                if (static_cast<int>(results[i].size()) != head_sizes[i]) {
+                    is_yolo_multihead = false;
+                    break;
+                }
+            }
+
+            if (is_yolo_multihead) {
+                // YOLOv5s anchors (COCO, 从 P3/P4/P5 依次排列)
+                // P3/stride=8:  [10,13], [16,30], [33,23]
+                // P4/stride=16: [30,61], [62,45], [59,119]
+                // P5/stride=32: [116,90], [156,198], [373,326]
+                static const float anchors[3][3][2] = {
+                    {{10.0f, 13.0f}, {16.0f, 30.0f}, {33.0f, 23.0f}},
+                    {{30.0f, 61.0f}, {62.0f, 45.0f}, {59.0f, 119.0f}},
+                    {{116.0f, 90.0f}, {156.0f, 198.0f}, {373.0f, 326.0f}}
+                };
+                static const int strides[3] = {8, 16, 32};
+                static const int head_hws[3][2] = {{80, 80}, {40, 40}, {20, 20}};
+
+                std::vector<float> concatenated;
+                concatenated.reserve(25200 * 85);
+
+                for (size_t i = 0; i < results.size(); ++i) {
+                    int h = head_hws[i][0];
+                    int w = head_hws[i][1];
+                    int stride = strides[i];
+                    const float* data = results[i].data();
+
+                    for (int a = 0; a < 3; ++a) {
+                        float anchor_w = anchors[i][a][0];
+                        float anchor_h = anchors[i][a][1];
+
+                        for (int y = 0; y < h; ++y) {
+                            for (int x = 0; x < w; ++x) {
+                                // 从 NCNN 通道分离存储中读取 85 个 raw logits
+                                // 通道布局: [a0_tx, a0_ty, a0_tw, a0_th, a0_obj,
+                                //            a0_cls0..79, a1_tx, ...]
+                                float raw[85];
+                                for (int k = 0; k < 85; ++k) {
+                                    int ch = a * 85 + k;
+                                    raw[k] = data[ch * h * w + y * w + x];
+                                }
+
+                                // YOLOv5 坐标解码（grid decoding）
+                                // cx = (sigmoid(tx) * 2 - 0.5 + grid_x) * stride
+                                // cy = (sigmoid(ty) * 2 - 0.5 + grid_y) * stride
+                                // w  = (sigmoid(tw) * 2)^2 * anchor_w
+                                // h  = (sigmoid(th) * 2)^2 * anchor_h
+                                float sig_tx = 1.0f / (1.0f + std::exp(-raw[0]));
+                                float sig_ty = 1.0f / (1.0f + std::exp(-raw[1]));
+                                float sig_tw = 1.0f / (1.0f + std::exp(-raw[2]));
+                                float sig_th = 1.0f / (1.0f + std::exp(-raw[3]));
+
+                                float cx = (sig_tx * 2.0f - 0.5f + static_cast<float>(x)) * stride;
+                                float cy = (sig_ty * 2.0f - 0.5f + static_cast<float>(y)) * stride;
+                                float bw = (sig_tw * 2.0f) * (sig_tw * 2.0f) * anchor_w;
+                                float bh = (sig_th * 2.0f) * (sig_th * 2.0f) * anchor_h;
+
+                                concatenated.push_back(cx);
+                                concatenated.push_back(cy);
+                                concatenated.push_back(bw);
+                                concatenated.push_back(bh);
+
+                                // objectness sigmoid
+                                concatenated.push_back(
+                                    1.0f / (1.0f + std::exp(-raw[4])));
+
+                                // class scores sigmoid
+                                for (int k = 5; k < 85; ++k) {
+                                    concatenated.push_back(
+                                        1.0f / (1.0f + std::exp(-raw[k])));
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Logger::Info(
+                    "NcnnBackend::Predict: YOLOv5 3-head decoded to [25200, 85]");
+
+                results.clear();
+                results.push_back(std::move(concatenated));
+                impl_->output_shapes.clear();
+                impl_->output_shapes.push_back({1, 25200, 85});
+            }
+        }
+
         if (cache_shapes && !impl_->output_shapes.empty()) {
             Logger::Info("NcnnBackend::Predict: output shapes cached");
         }
@@ -341,6 +457,13 @@ std::vector<std::string> NcnnBackend::GetOutputNames() const {
 // 返回模型输出张量形状列表，首次 Predict 后缓存，此前为空
 std::vector<std::vector<int64_t>> NcnnBackend::GetOutputShapes() const {
     return impl_->output_shapes;
+}
+
+// 设置模型输入尺寸，用于 NCNN 模型未包含 shape 信息时的回退
+void NcnnBackend::SetInputSize(int width, int height, int channels) {
+    impl_->fallback_input_width = width;
+    impl_->fallback_input_height = height;
+    impl_->fallback_input_channels = channels;
 }
 
 }  // namespace inference

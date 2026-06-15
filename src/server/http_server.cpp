@@ -86,7 +86,9 @@ void RunServer(const ServerConfig& config) {
     // 创建推理后端
     std::unique_ptr<InferenceBackend> backend;
     if (config.backend_type == "ncnn") {
-        backend = std::make_unique<NcnnBackend>();
+        auto ncnn_backend = std::make_unique<NcnnBackend>();
+        ncnn_backend->SetInputSize(config.input_width, config.input_height);
+        backend = std::move(ncnn_backend);
         Logger::Info("RunServer: using NCNN backend");
     } else {
         backend = std::make_unique<OnnxBackend>();

@@ -1,7 +1,7 @@
 # 项目交接文档 (HANDOVER.md)
 
 创建日期：2026-05-30
-最后更新：2026-06-16
+最后更新：2026-06-16（新增 NCNN YOLOv5 Grid Decoding 修复专题）
 
 ## 项目整体状态
 
@@ -182,6 +182,76 @@ cd ..
 | LLM 缺少 Chat Template 导致重复生成或直接 EOS | 在 Generate/GenerateStream 中调用 `llama_chat_apply_template` 包装 prompt 为对话格式 | ✅ 模型正确回答问题（2+2=4, Paris, Shakespeare），不再重复 prompt |
 | 构建脚本工作目录导致模型路径找不到 | build.sh/rebuild.sh 运行前 `cd ..` 回项目根目录 | ✅ 服务启动时 ONNX 和 LLM 模型均正常加载 |
 | /detect 不支持图片路径输入 | 新增 JSON `image_path` 字段支持，优先 multipart 文件上传 | ✅ 两种输入方式均正常工作 |
+| NCNN YOLOv5 多头输出坐标未解码 | 在 NcnnBackend::Predict 中实现完整 YOLOv5 grid decoding（详见下方专题） | ✅ NCNN 与 ONNX 检测结果一致，bbox 差异 <1px，置信度差异 <0.01 |
+
+## NCNN YOLOv5 Grid Decoding 修复专题
+
+### 问题背景
+
+NCNN 后端使用 nihui/ncnn-assets 提供的 YOLOv5s 模型（`yolov5s.param` + `yolov5s.bin`），该模型有 3 个输出头（out0/out1/out2），分别对应 3 个检测尺度。与 ONNX 模型不同，NCNN 模型 **不包含 Detect 层**，输出的 3 个头是 **raw logits**（未解码的原始值）。
+
+### 根因分析
+
+`ProcessYoloOutput`（`src/postprocess/yolo_postprocess.cpp`）期望接收 `[25200, 85]` 格式的数据，其中每行的 85 个值为：
+- `[0..3]`：cx, cy, w, h — **640×640 像素空间的绝对坐标**
+- `[4]`：objectness — **已 sigmoid**
+- `[5..84]`：class scores — **已 sigmoid**
+
+但 NCNN nihui 模型的 3 个输出头 `{255, H, W}` 输出的是 raw logits：
+- cx/cy 是相对网格的偏移量（需 sigmoid + grid 偏移 × stride 才能得到绝对坐标）
+- w/h 是 log 空间值（需 sigmoid × 2 的平方 × anchor 尺寸）
+- objectness 和 class scores 是未激活的 logits（需 sigmoid）
+
+旧代码仅对 objectness 和 class score 做了 sigmoid，cx/cy/w/h 原样传递，导致：
+- 检测框位置完全错误（cx/cy 为 grid 偏移量而非像素坐标）
+- 框宽高无意义（log 空间的原始值）
+
+### 解决方案
+
+在 `NcnnBackend::Predict()` 的多头输出拼接逻辑中，实现完整的 YOLOv5 grid decoding：
+
+```cpp
+// YOLOv5 坐标解码公式：
+// cx = (sigmoid(tx) * 2 - 0.5 + grid_x) * stride
+// cy = (sigmoid(ty) * 2 - 0.5 + grid_y) * stride
+// w  = (sigmoid(tw) * 2)^2 * anchor_w
+// h  = (sigmoid(th) * 2)^2 * anchor_h
+```
+
+关键参数：
+- **Anchors**（COCO，640×640）：
+  - P3/stride=8: `[10,13], [16,30], [33,23]`
+  - P4/stride=16: `[30,61], [62,45], [59,119]`
+  - P5/stride=32: `[116,90], [156,198], [373,326]`
+- **Strides**: 8, 16, 32
+- **头空间尺寸**: 80×80, 40×40, 20×20
+
+### 方案选择过程
+
+| 方案 | 描述 | 结果 |
+|------|------|------|
+| 方案1 | 用 onnx2ncnn 自行转换 ONNX→NCNN 模型（含 Detect 层） | ❌ Homebrew NCNN 20260526 的 `load_param` 抛出 `std::length_error`（Unknown data type 0 不兼容） |
+| 方案2 | 在 NCNN 后端代码中实现 YOLOv5 grid decoding | ✅ 采用，解码后输出与 ONNX Detect 层一致 |
+| 方案3 | 从源码编译 NCNN 以兼容 onnx2ncnn 输出 | ❌ 不可维护，与 Homebrew 管理冲突 |
+
+### 修改文件
+
+- `src/backend/ncnn_backend.cpp`：`Predict()` 方法中的多头输出处理部分（约第326~430行），将原来的简单 sigmoid+拼接 替换为完整的 grid decoding + sigmoid + 拼接
+
+### 验证结果
+
+使用 `BACKEND_TYPE=ncnn DETECTOR_MODEL=models/yolov5s.param` 启动服务，对 test.jpg 检测：
+
+| 检测 | NCNN 结果 | ONNX 结果 | 坐标差异 | 置信度差异 |
+|------|-----------|-----------|----------|-----------|
+| person | 0.825, bbox [221,407,345,877] | 0.827, bbox [221,407,345,876] | <1px | 0.002 |
+| person | 0.816, bbox [662,384,809,882] | 0.815, bbox [662,385,809,880] | <2px | 0.001 |
+| person | 0.783, bbox [57,404,206,909] | 0.783, bbox [48,393,258,913] | ~10px | 0.000 |
+| bus | 0.766, bbox [17,220,793,797] | 0.771, bbox [16,219,793,797] | <2px | 0.005 |
+| person | 0.469, bbox [0,553,72,875] | 0.482, bbox [0,553,73,875] | <1px | 0.013 |
+
+- 6 个单元测试全部通过
+- ONNX 后端无回归
 
 ## 下一步行动建议
 
