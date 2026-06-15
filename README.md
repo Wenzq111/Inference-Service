@@ -60,10 +60,19 @@ Ubuntu: 参考 [onnxruntime releases](https://github.com/microsoft/onnxruntime/r
 macOS: `brew install ncnn`
 Ubuntu: 参考 [ncnn 编译指南](https://github.com/Tencent/ncnn#build) 从源码编译，设置 `NCNN_ROOT` 指向安装路径
 
+> **重要**：NCNN 后端必须使用 [nihui/ncnn-assets](https://github.com/nihui/ncnn-assets) 提供的预转换 YOLOv5s 模型（3 头输出，raw logits）。自行用 `onnx2ncnn` 转换的模型与 Homebrew NCNN 存在兼容性问题（`Unknown data type 0`）。后端代码已内置 YOLOv5 grid decoding，会自动将 raw logits 解码为与 ONNX Detect 层一致的格式。
+
 ### llama.cpp
 
 macOS: `brew install llama.cpp`
 Ubuntu: 参考 [llama.cpp 编译指南](https://github.com/ggml-org/llama.cpp) 从源码编译，设置 `LLAMA_ROOT` 指向安装路径
+
+### Google Test（单元测试）
+
+macOS: `brew install googletest`
+Ubuntu: `sudo apt install libgtest-dev`
+
+> **注意**：若系统安装了 anaconda3，其自带的 GTest 动态库可能存在 ABI 不兼容问题。CMakeLists.txt 已配置自动优先使用 Homebrew GTest（`GTest_ROOT=/opt/homebrew`），无需手动处理。
 
 ### cpp-httplib
 
@@ -201,32 +210,45 @@ curl -X POST -H "Content-Type: application/json" \
 | 变量 | 默认值 | 说明 |
 |---|---|---|
 | INFERENCE_PORT | 8080 | HTTP 服务监听端口 |
+| BACKEND_TYPE | onnx | 推理后端类型（`onnx` 或 `ncnn`） |
 | DETECTOR_MODEL | models/yolov5s.onnx | 检测器模型文件路径 |
 | LLM_MODEL | models/llama.gguf | LLM 模型文件路径（GGUF 格式） |
-| BACKEND_TYPE | onnx | 推理后端类型（onnx 或 ncnn） |
 | INPUT_WIDTH | 640 | 检测器输入宽度 |
 | INPUT_HEIGHT | 640 | 检测器输入高度 |
+| NCNN_VULKAN | （未设置） | 设置为 `1` 启用 NCNN Vulkan GPU 加速（默认禁用，macOS 上不稳定） |
 
 示例：
 
 ```bash
-# 使用 NCNN 后端，端口 9090
-INFERENCE_PORT=9090 BACKEND_TYPE=ncnn ./build/inference_service
+# 使用 ONNX 后端（默认）
+./build/inference_service
 
-# 指定模型路径
-DETECTOR_MODEL=/data/models/yolov5s.onnx LLM_MODEL=/data/models/qwen.gguf ./build/inference_service
+# 使用 NCNN 后端
+BACKEND_TYPE=ncnn DETECTOR_MODEL=models/yolov5s.param ./build/inference_service
+
+# 使用 NCNN 后端 + Vulkan GPU 加速
+NCNN_VULKAN=1 BACKEND_TYPE=ncnn DETECTOR_MODEL=models/yolov5s.param ./build/inference_service
+
+# 自定义端口和模型路径
+INFERENCE_PORT=9090 DETECTOR_MODEL=/data/models/yolov5s.onnx LLM_MODEL=/data/models/qwen.gguf ./build/inference_service
 ```
 
 ## 模型文件
 
-将模型文件放置在 `models/` 目录下：
+将模型文件放置在 `models/` 目录下。模型文件不纳入版本控制，需自行下载或导出。
 
-- `models/yolov5s.onnx` — YOLOv5s 目标检测模型（ONNX 格式，**必须为 float32 输入类型**）
-- `models/llama.gguf` — LLM 文本生成模型（GGUF 格式）
+### 检测模型
 
-模型文件不纳入版本控制，需自行下载或导出。
+本项目支持两种检测后端，需要不同的模型文件：
 
-### 获取 YOLOv5s float32 ONNX 模型
+| 后端 | 模型文件 | 格式 | 获取方式 |
+|------|---------|------|---------|
+| ONNX | `models/yolov5s.onnx` | ONNX float32 | 自行导出（见下方） |
+| NCNN | `models/yolov5s.param` + `models/yolov5s.bin` | NCNN param+bin | 从 nihui/ncnn-assets 下载 |
+
+> 两个后端可同时使用，通过 `BACKEND_TYPE` 环境变量切换。NCNN 后端启动时需指定 `.param` 文件：`DETECTOR_MODEL=models/yolov5s.param`。
+
+#### 获取 ONNX 检测模型
 
 > **注意**：GitHub releases 上的 `yolov5s.onnx` 为 float16 输入类型，与本项目不兼容（ONNX Runtime 后端要求 float32 输入）。请按以下方式导出 float32 版本：
 
@@ -255,7 +277,19 @@ for inp in model.graph.input:
     print(f'{inp.name}: type={inp.type.tensor_type.elem_type}')
 ```
 
-### 获取 LLM 模型
+#### 获取 NCNN 检测模型
+
+> **必须**使用 [nihui/ncnn-assets](https://github.com/nihui/ncnn-assets) 提供的预转换模型。**不要**使用 `onnx2ncnn` 自行转换——Homebrew NCNN 的 `load_param` 与 onnx2ncnn 输出存在兼容性问题（`Unknown data type 0`）。
+
+```bash
+# 从 nihui/ncnn-assets 下载 YOLOv5s NCNN 模型
+wget -O models/yolov5s.param https://github.com/nihui/ncnn-assets/raw/main/models/yolov5s.ncnn.param
+wget -O models/yolov5s.bin https://github.com/nihui/ncnn-assets/raw/main/models/yolov5s.ncnn.bin
+```
+
+该模型为 3 头输出（out0/out1/out2），输出 raw logits。后端代码已内置完整的 YOLOv5 grid decoding（sigmoid + anchor 解码 + 坐标变换），会自动将 3 个头解码拼接为与 ONNX Detect 层一致的 `[25200, 85]` 格式，无需额外处理。
+
+### LLM 模型
 
 推荐使用 [TinyLlama 1.1B Chat](https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF)（Q4_K_M 量化，约 638MB）：
 
@@ -266,11 +300,14 @@ wget -O models/llama.gguf "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v
 
 也可使用其他 GGUF 格式模型，通过环境变量 `LLM_MODEL` 指定路径。模型需包含 `chat_template` 元数据，服务会自动应用对话模板；若无模板则回退为原始 prompt。
 
+> macOS 上 llama.cpp 自动启用 Metal GPU 加速（Apple Silicon），无需额外配置。
+
 ## 文档
 
 - [AI 协作规范](docs/AGENTS.md)
 - [开发任务清单](docs/TASKS.md)
 - [架构设计文档](docs/ARCHITECTURE.md)
 - [项目交接文档](docs/HANDOVER.md)
+- [全项目验证测试报告](docs/TEST_REPORT.md)
 - [llama.cpp API 指南](docs/LLAMA_CPP_GUIDE.md)
 - [批量预处理器指南](docs/BATCH_PREPROCESSOR_GUIDE.md)
