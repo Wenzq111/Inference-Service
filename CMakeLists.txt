@@ -209,6 +209,15 @@ option(BUILD_TESTS "Build unit tests" ON)
 
 if(BUILD_TESTS)
     enable_testing()
+
+    # 优先使用 Homebrew GTest（静态库），避免 anaconda3 GTest（动态库）ABI 不兼容
+    # anaconda3 的 libgtest.dylib 链接 libc++，与 Apple Clang arm64 存在 ABI 差异导致链接失败
+    if(NOT GTest_ROOT)
+        if(APPLE AND EXISTS /opt/homebrew/lib/cmake/GTest)
+            set(GTest_ROOT /opt/homebrew)
+        endif()
+    endif()
+
     find_package(GTest REQUIRED)
 
     # 公共测试源文件（非测试框架的模块源码）
