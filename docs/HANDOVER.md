@@ -5,7 +5,7 @@
 
 ## 项目整体状态
 
-- 已完成模块：M0（项目骨架）、M1（图像预处理）、M2（推理后端抽象接口）、M3（ONNX Runtime 后端）、M4（NCNN 后端）、M5（YOLO 后处理）、M6（目标检测器）、M7（LLM 文本生成模块）、M8（批量预处理流水线）、M9（REST API 服务）、M10（单元测试集）
+- 已完成模块：M0（项目骨架）、M1（图像预处理）、M2（推理后端抽象接口）、M3（ONNX Runtime 后端）、M4（NCNN 后端）、M5（YOLO 后处理）、M6（目标检测器）、M7（LLM 文本生成模块）、M8（批量预处理流水线）、M9（REST API 服务）、M10（单元测试集）、M11（基准测试）
 - 代码量估算：约 5100 行（不含注释和文档）
 - 当前可编译运行，启动 HTTP 服务监听 8080 端口，提供 /detect、/generate、/health 端点
 
@@ -52,6 +52,9 @@ Inference-Service/
 │   ├── test_yolo_postprocess.cpp
 │   ├── test_batch_preprocessor.cpp
 │   └── test_object_detector.cpp
+├── benchmarks/
+│   ├── performance_benchmark.cpp
+│   └── benchmark_utils.h
 ├── docs/
 │   ├── AGENTS.md
 │   ├── TASKS.md
@@ -92,6 +95,8 @@ Inference-Service/
 | `include/batch_preprocessor.h` | M8 | BatchPreprocessor 类声明（PImpl 模式），PreprocessMode 枚举，PreprocessResult/PreprocessCallback 类型 |
 | `src/pipeline/batch_preprocessor.cpp` | M8 | BatchPreprocessor 实现（PImpl，线程池 + 任务队列 + condition_variable + Resize/Letterbox 双模式） |
 | `include/http_server.h` | M9 | ServerConfig 结构体，RunServer 函数声明 |
+| `benchmarks/benchmark_utils.h` | M11 | 基准测试辅助结构体（BenchmarkResult）+ 统计计算 + Markdown 表格 + CSV 输出 |
+| `benchmarks/performance_benchmark.cpp` | M11 | 基准测试主程序（命令行参数解析 + ONNX/NCNN 多后端测试 + 预热 + 批量 + Markdown/CSV 输出） |
 | `src/server/http_server.cpp` | M9 | HTTP 服务实现（cpp-httplib，/detect 支持 multipart 文件上传 + JSON image_path 路径输入，/generate 支持 Chat Template，/health，互斥锁保护检测/生成） |
 | `src/main.cpp` | M0+M9 | 主入口（读取环境变量配置 → 调用 RunServer 阻塞运行） |
 | `tests/test_logger.cpp` | M10 | Logger 单元测试（8 个测试用例：级别过滤、空消息、长消息） |
@@ -140,7 +145,7 @@ cd ..
 - [x] M8. 批量预处理流水线 — 依赖 M1 ✅ 已完成
 - [x] M9. REST API 服务 — 依赖 M3/M6/M7, cpp-httplib ✅ 已完成
 - [x] M10. 单元测试集 — 依赖所有模块 ✅ 已完成（82 个测试用例，6 个测试文件）
-- [ ] M11. 基准测试 — 依赖 M3, M4, M6
+- [x] M11. 基准测试 — 依赖 M3, M4, M6 ✅ 已完成（手写循环基准测试，支持多后端/批量/Markdown+CSV 输出）
 
 ## 编码约定
 

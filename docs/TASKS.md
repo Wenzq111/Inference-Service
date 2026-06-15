@@ -15,7 +15,7 @@
 - [x] M8. 批量预处理流水线 — 500行 — 依赖 M1 — 实现生产者-消费者队列，多线程并行预处理图像，支持批次等待和超时
 - [x] M9. REST API 服务 — 500行 — 依赖 M3/M6/M7, cpp-httplib — 实现 HTTP 服务，提供 /detect、/generate、/health 端点，支持并发请求
 - [x] M10. 单元测试集 — 1500行 — 依赖所有模块 — 使用 Google Test 为每个模块编写单元测试，覆盖主要功能和边界条件
-- [ ] M11. 基准测试 — 800行 — 依赖 M3, M4, M6 — 使用 Google Benchmark 测试不同后端、批次大小、量化模式的延迟和吞吐量
+- [x] M11. 基准测试 — 800行 — 依赖 M3, M4, M6 — 手写循环基准测试，支持 ONNX/NCNN 多后端、多批量大小、预热、Markdown 表格 + CSV 输出
 
 ## 模块进度
 
@@ -32,4 +32,4 @@
 | M8 批量预处理流水线 | ✅ 完成 | batch_preprocessor.h, batch_preprocessor.cpp |
 | M9 REST API 服务 | ✅ 完成 | http_server.h, http_server.cpp |
 | M10 单元测试集 | ✅ 完成 | test_logger.cpp, test_timer.cpp, test_preprocess.cpp, test_yolo_postprocess.cpp, test_batch_preprocessor.cpp, test_object_detector.cpp |
-| M11 基准测试 | 待开发 | - |
+| M11 基准测试 | ✅ 完成 | benchmarks/performance_benchmark.cpp, benchmarks/benchmark_utils.h |

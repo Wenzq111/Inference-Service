@@ -268,3 +268,36 @@ if(BUILD_TESTS)
     add_inference_test(test_batch_preprocessor)
     add_inference_test(test_object_detector)
 endif()
+
+# ---- 性能基准测试（M11）----
+option(BUILD_BENCHMARKS "Build performance benchmarks" ON)
+
+if(BUILD_BENCHMARKS)
+    add_executable(performance_benchmark
+        benchmarks/performance_benchmark.cpp
+        src/utils/logger.cpp
+        src/utils/timer.cpp
+        src/preprocess/preprocess.cpp
+        src/backend/onnx_backend.cpp
+        src/backend/ncnn_backend.cpp
+        src/postprocess/yolo_postprocess.cpp
+        src/detector/object_detector.cpp
+    )
+    target_include_directories(performance_benchmark PRIVATE include)
+    if(ONNXRUNTIME_INCLUDE_DIR)
+        target_include_directories(performance_benchmark PRIVATE ${ONNXRUNTIME_INCLUDE_DIR})
+    endif()
+    if(NCNN_INCLUDE_DIR)
+        target_include_directories(performance_benchmark PRIVATE ${NCNN_INCLUDE_DIR})
+    endif()
+    target_link_libraries(performance_benchmark
+        ${OpenCV_LIBS} ${ORT_LINK_TARGET} ${NCNN_LINK_TARGET})
+    if(APPLE AND NOT ncnn_FOUND)
+        find_library(METAL_FRAMEWORK_BENCH Metal)
+        find_library(FOUNDATION_FRAMEWORK_BENCH Foundation)
+        if(METAL_FRAMEWORK_BENCH AND FOUNDATION_FRAMEWORK_BENCH)
+            target_link_libraries(performance_benchmark
+                ${METAL_FRAMEWORK_BENCH} ${FOUNDATION_FRAMEWORK_BENCH})
+        endif()
+    endif()
+endif()
