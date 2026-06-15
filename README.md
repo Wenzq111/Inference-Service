@@ -91,6 +91,8 @@ cmake ..
 make
 ```
 
+> **注意**：运行服务时需在项目根目录下执行 `./build/inference_service`，以确保 `models/` 相对路径正确解析。
+
 ### 启动服务
 
 ```bash
@@ -148,11 +150,11 @@ curl -X POST -F "image=@test.jpg" "http://localhost:8080/detect?confidence=0.5&n
 
 ### 文本生成
 
-发送 prompt 进行 LLM 文本生成：
+发送 prompt 进行 LLM 文本生成（自动应用 Chat Template，模型以对话模式回答）：
 
 ```bash
 curl -X POST -H "Content-Type: application/json" \
-  -d '{"prompt":"你好，请介绍一下自己","max_tokens":128,"temperature":0.7}' \
+  -d '{"prompt":"What is the capital of France?","max_tokens":50}' \
   http://localhost:8080/generate
 ```
 
@@ -170,10 +172,12 @@ curl -X POST -H "Content-Type: application/json" \
 ```json
 {
   "success": true,
-  "text": "我是一个AI助手...",
-  "inference_time_ms": 150.3
+  "text": "Yes, France is the capital of France. The capital of France is Paris, located in the Île-de-France region.",
+  "inference_time_ms": 144.9
 }
 ```
+
+> **Chat Template**：服务自动使用 `llama_chat_apply_template` 将 prompt 包装为模型期望的对话格式（如 `<s>  user\n...message...</s>  assistant\n`），无需用户手动格式化。
 
 错误响应：
 
@@ -250,7 +254,7 @@ for inp in model.graph.input:
 wget -O models/llama.gguf "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
 ```
 
-也可使用其他 GGUF 格式模型，通过环境变量 `LLM_MODEL` 指定路径。
+也可使用其他 GGUF 格式模型，通过环境变量 `LLM_MODEL` 指定路径。模型需包含 `chat_template` 元数据，服务会自动应用对话模板；若无模板则回退为原始 prompt。
 
 ## 文档
 

@@ -6,6 +6,7 @@
 
 #include <filesystem>
 #include <thread>
+#include <vector>
 
 namespace inference {
 
@@ -77,6 +78,36 @@ struct LlamaGenerator::Impl {
                                static_cast<size_t>(-n));
         }
         return std::string(buf, static_cast<size_t>(n));
+    }
+
+    // 将 prompt 包装为对话模板格式
+    // 使用 llama_chat_apply_template 自动读取模型自带的 chat_template
+    // 返回: 包装后的完整字符串，如 "<s> </think>\nWhat is 2+2?</s>  user\n"
+    std::string ApplyChatTemplate(const std::string& prompt) const {
+        if (!model) {
+            return prompt;
+        }
+
+        llama_chat_message msg;
+        msg.role = "user";
+        msg.content = prompt.c_str();
+
+        int32_t len = llama_chat_apply_template(
+            nullptr, &msg, 1, true, nullptr, 0);
+        if (len <= 0) {
+            Logger::Warning("Impl::ApplyChatTemplate: template not available, using raw prompt");
+            return prompt;
+        }
+
+        std::vector<char> buf(static_cast<size_t>(len) + 1);
+        len = llama_chat_apply_template(
+            nullptr, &msg, 1, true, buf.data(), static_cast<int32_t>(buf.size()));
+        if (len <= 0) {
+            Logger::Warning("Impl::ApplyChatTemplate: template application failed, using raw prompt");
+            return prompt;
+        }
+
+        return std::string(buf.data(), static_cast<size_t>(len));
     }
 
     // 释放所有 llama.cpp 资源
@@ -224,11 +255,14 @@ std::string LlamaGenerator::Generate(const std::string& prompt,
     Timer timer;
     timer.Start();
 
-    // 分词：将 prompt 转为 token ids
+    // 应用对话模板，将 prompt 包装为模型期望的对话格式
+    std::string formatted = pImpl_->ApplyChatTemplate(prompt);
+
+    // 分词：将模板包装后的文本转为 token ids
     int32_t n_tokens_max = static_cast<int32_t>(llama_n_ctx(pImpl_->ctx));
     std::vector<llama_token> tokens(static_cast<size_t>(n_tokens_max));
     int32_t n_tokens = llama_tokenize(
-        pImpl_->vocab, prompt.c_str(), static_cast<int32_t>(prompt.size()),
+        pImpl_->vocab, formatted.c_str(), static_cast<int32_t>(formatted.size()),
         tokens.data(), n_tokens_max, true, false);
     if (n_tokens < 0) {
         Logger::Error("LlamaGenerator::Generate: tokenization failed, prompt too long");
@@ -343,11 +377,14 @@ void LlamaGenerator::GenerateStream(const std::string& prompt,
     Timer timer;
     timer.Start();
 
+    // 应用对话模板
+    std::string formatted = pImpl_->ApplyChatTemplate(prompt);
+
     // 分词
     int32_t n_tokens_max = static_cast<int32_t>(llama_n_ctx(pImpl_->ctx));
     std::vector<llama_token> tokens(static_cast<size_t>(n_tokens_max));
     int32_t n_tokens = llama_tokenize(
-        pImpl_->vocab, prompt.c_str(), static_cast<int32_t>(prompt.size()),
+        pImpl_->vocab, formatted.c_str(), static_cast<int32_t>(formatted.size()),
         tokens.data(), n_tokens_max, true, false);
     if (n_tokens < 0) {
         Logger::Error("LlamaGenerator::GenerateStream: tokenization failed");

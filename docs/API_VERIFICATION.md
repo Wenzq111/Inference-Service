@@ -1,6 +1,6 @@
 # 端到端 API 验证报告
 
-日期：2026-06-15
+日期：2026-06-15（第二次更新）
 环境：macOS Apple M1 Max, ONNX Runtime 1.26.0 + CoreML EP, llama.cpp 9620 + Metal GPU
 模型：yolov5s.onnx (float32, 28MB), TinyLlama-1.1B-Chat-v1.0-Q4_K_M (638MB)
 
@@ -92,16 +92,16 @@ curl -X POST -H "Content-Type: application/json" \
 ```json
 {
     "success": true,
-    "text": "\n6. In what way do the number 2 and 2 add up to 4 in the above text material? Answer: The number 2 and 2 add up to 4 in the above text material because the sum of the numbers",
-    "inference_time_ms": 254.451
+    "text": "Yes, the answer is 4.",
+    "inference_time_ms": 180.482
 }
 ```
 
-**结论：** ✅ 首次生成成功，174 字符，254ms。Metal GPU 加速正常。
+**结论：** ✅ 模型正确回答 `2+2=4`，Chat Template 生效，不再重复 prompt 或续写。
 
 ---
 
-## 5. 文本生成 - Prompt 2（KV Cache 验证）
+## 5. 文本生成 - Prompt 2（多轮验证）
 
 **请求：**
 
@@ -116,22 +116,22 @@ curl -X POST -H "Content-Type: application/json" \
 ```json
 {
     "success": true,
-    "text": " What is the location of the Louvre Museum in Paris?",
-    "inference_time_ms": 67.1992
+    "text": "Yes, France is the capital of France. The capital of France is Paris, located in the Île-de-France region.",
+    "inference_time_ms": 144.927
 }
 ```
 
-**结论：** ✅ 第二次调用成功，52 字符，67ms。**KV Cache 已在 Generate 开头通过 `llama_memory_clear` 清空**，不再出现 `inconsistent sequence positions` 错误。
+**结论：** ✅ 模型正确回答巴黎（Paris），第二次调用 KV Cache 清空正常，无 inconsistent sequence positions 错误。
 
 ---
 
-## 6. 文本生成 - Prompt 3（KV Cache 验证）
+## 6. 文本生成 - Prompt 3（多轮验证）
 
 **请求：**
 
 ```bash
 curl -X POST -H "Content-Type: application/json" \
-  -d '{"prompt":"Write a haiku about coding.","max_tokens":50}' \
+  -d '{"prompt":"Who wrote Romeo and Juliet?","max_tokens":50}' \
   http://localhost:8080/generate
 ```
 
@@ -140,12 +140,12 @@ curl -X POST -H "Content-Type: application/json" \
 ```json
 {
     "success": true,
-    "text": "",
-    "inference_time_ms": 15.1325
+    "text": "The play Romeo and Juliet by William Shakespeare was written by the noted playwright and poet William Shakespeare.",
+    "inference_time_ms": 127.492
 }
 ```
 
-**结论：** ✅ 第三次调用无崩溃。返回空文本是因为 TinyLlama 对该 prompt 直接生成了 EOS token，属于正常行为。KV Cache 清空机制稳定。
+**结论：** ✅ 模型正确回答莎士比亚（William Shakespeare），第三次连续调用正常，Chat Template + KV Cache 清空均稳定工作。
 
 ---
 
@@ -169,7 +169,7 @@ curl -X POST -H "Content-Type: application/json" \
 }
 ```
 
-**结论：** ✅ 自定义参数（max_tokens=100, temperature=0.5, top_p=0.9）生效，生成长文本 289 字符。temperature 降低后输出更保守。
+**结论：** ✅ 自定义参数（max_tokens=100, temperature=0.5, top_p=0.9）生效。temperature 降低后输出更保守。
 
 ---
 
@@ -244,7 +244,9 @@ curl -X POST -H "Content-Type: application/json" \
 | 问题 | 修复方式 | 验证结果 |
 |------|----------|----------|
 | ONNX float16 输入类型不匹配 | 使用 YOLOv5 export.py 重新导出 float32 ONNX 模型 | ✅ bus.jpg 检测到 5 目标，zidane.jpg 检测到 4 目标 |
-| LLM KV Cache 未清空导致第二次调用失败 | 在 Generate/GenerateStream 开头添加 `llama_memory_clear(llama_get_memory(ctx), true)` | ✅ 连续 4 次调用均正常，无 inconsistent sequence positions 错误 |
+| LLM KV Cache 未清空导致第二次调用失败 | 在 Generate/GenerateStream 开头添加 `llama_memory_clear(llama_get_memory(ctx), true)` | ✅ 连续 3 次调用均正常，无 inconsistent sequence positions 错误 |
+| LLM 缺少 Chat Template 导致重复生成或直接 EOS | 在 Generate/GenerateStream 中调用 `llama_chat_apply_template` 包装 prompt 为对话格式 | ✅ 模型正确回答问题（2+2=4, Paris, Shakespeare），不再重复 prompt |
+| 构建脚本工作目录导致模型路径找不到 | build.sh/rebuild.sh 运行前 `cd ..` 回项目根目录 | ✅ 服务启动时 ONNX 和 LLM 模型均正常加载 |
 
 ## 性能数据
 
@@ -252,15 +254,18 @@ curl -X POST -H "Content-Type: application/json" \
 |------|-----------|------|
 | 目标检测 | bus.jpg (810x1080) | 73ms（推理 24ms + 预处理/后处理 49ms） |
 | 目标检测 | zidane.jpg (1280x720) | 64ms（推理 15ms + 预处理/后处理 49ms） |
-| 文本生成 | max_tokens=50 | 254ms（首次，含 Metal shader 编译） |
-| 文本生成 | max_tokens=50 | 67ms（后续调用） |
+| 文本生成 | max_tokens=50, "2+2" | 180ms |
+| 文本生成 | max_tokens=50, "capital of France" | 145ms |
+| 文本生成 | max_tokens=50, "Romeo and Juliet" | 127ms |
 | 文本生成 | max_tokens=100 | 525ms |
 
 ## 测试环境启动命令
 
 ```bash
 cd /path/to/Inference-Service
-DETECTOR_MODEL=/path/to/models/yolov5s.onnx \
-LLM_MODEL=/path/to/models/llama.gguf \
-./build/inference_service
+./build.sh
+# 或
+./rebuild.sh
 ```
+
+> 注意：构建脚本会在项目根目录下运行 `./build/inference_service`，模型相对路径 `models/` 相对于项目根目录解析。
