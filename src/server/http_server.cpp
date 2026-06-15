@@ -154,6 +154,9 @@ void RunServer(const ServerConfig& config) {
     });
 
     // POST /detect 目标检测
+    // 支持两种输入方式：
+    //   1. multipart/form-data 上传图片文件（字段名 image）
+    //   2. JSON body 指定图片路径（字段名 image_path）
     svr.Post("/detect", [&detector, &detect_mutex](const httplib::Request& req,
                                                      httplib::Response& res) {
         res.set_header("Content-Type", "application/json");
@@ -165,23 +168,33 @@ void RunServer(const ServerConfig& config) {
             return;
         }
 
-        // 检查是否有 image 文件
-        if (!req.has_file("image")) {
-            res.status = 400;
-            res.set_content(ErrorJson("No image field in request"), "application/json");
-            return;
-        }
+        cv::Mat img;
 
-        // 获取上传的图像数据
-        auto file = req.get_file_value("image");
-        std::vector<uint8_t> img_data(file.content.begin(), file.content.end());
-
-        // 从内存解码图像
-        cv::Mat img = cv::imdecode(img_data, cv::IMREAD_COLOR);
-        if (img.empty()) {
-            res.status = 400;
-            res.set_content(ErrorJson("Failed to decode image"), "application/json");
-            return;
+        // 优先方式1：检查是否有 multipart 文件字段 image
+        if (req.has_file("image")) {
+            auto file = req.get_file_value("image");
+            std::vector<uint8_t> img_data(file.content.begin(), file.content.end());
+            img = cv::imdecode(img_data, cv::IMREAD_COLOR);
+            if (img.empty()) {
+                res.status = 400;
+                res.set_content(ErrorJson("Failed to decode image"), "application/json");
+                return;
+            }
+        } else {
+            // 方式2：尝试从 JSON body 解析 image_path
+            const std::string& body = req.body;
+            std::string image_path = GetJsonValue(body, "image_path");
+            if (image_path.empty()) {
+                res.status = 400;
+                res.set_content(ErrorJson("No image or image_path field in request"), "application/json");
+                return;
+            }
+            img = cv::imread(image_path);
+            if (img.empty()) {
+                res.status = 400;
+                res.set_content(ErrorJson("Failed to read image from path: " + image_path), "application/json");
+                return;
+            }
         }
 
         // 解析可选参数

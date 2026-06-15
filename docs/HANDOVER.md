@@ -1,7 +1,7 @@
 # 项目交接文档 (HANDOVER.md)
 
 创建日期：2026-05-30
-最后更新：2026-06-14
+最后更新：2026-06-16
 
 ## 项目整体状态
 
@@ -56,7 +56,11 @@ Inference-Service/
 │   ├── AGENTS.md
 │   ├── TASKS.md
 │   ├── ARCHITECTURE.md
-│   └── HANDOVER.md
+│   ├── HANDOVER.md
+│   ├── API_VERIFICATION.md
+│   ├── LLAMA_CPP_GUIDE.md
+│   └── BATCH_PREPROCESSOR_GUIDE.md
+├── models/               # 模型文件 (gitignored)
 ├── build.sh
 ├── rebuild.sh
 ├── .vscode/
@@ -84,11 +88,11 @@ Inference-Service/
 | `include/detector.h` | M6 | ObjectDetector 类声明（组合后端+预处理+后处理） |
 | `src/detector/object_detector.cpp` | M6 | ObjectDetector 实现（Detect: Letterbox→MatToChw→Predict→ProcessYoloOutput→ScaleDetectionsToOriginal） |
 | `include/llm_generator.h` | M7 | LlamaGenerator 类声明（PImpl 模式），GenerationConfig 结构体 |
-| `src/llm/llm_generator.cpp` | M7 | LlamaGenerator 实现（PImpl，llama_model_load_from_file + llama_init_from_model + sampler chain + Metal GPU 加速） |
+| `src/llm/llm_generator.cpp` | M7 | LlamaGenerator 实现（PImpl，llama_model_load_from_file + llama_init_from_model + sampler chain + Metal GPU 加速 + Chat Template + KV Cache 清空） |
 | `include/batch_preprocessor.h` | M8 | BatchPreprocessor 类声明（PImpl 模式），PreprocessMode 枚举，PreprocessResult/PreprocessCallback 类型 |
 | `src/pipeline/batch_preprocessor.cpp` | M8 | BatchPreprocessor 实现（PImpl，线程池 + 任务队列 + condition_variable + Resize/Letterbox 双模式） |
 | `include/http_server.h` | M9 | ServerConfig 结构体，RunServer 函数声明 |
-| `src/server/http_server.cpp` | M9 | HTTP 服务实现（cpp-httplib，/detect + /generate + /health，互斥锁保护检测/生成） |
+| `src/server/http_server.cpp` | M9 | HTTP 服务实现（cpp-httplib，/detect 支持 multipart 文件上传 + JSON image_path 路径输入，/generate 支持 Chat Template，/health，互斥锁保护检测/生成） |
 | `src/main.cpp` | M0+M9 | 主入口（读取环境变量配置 → 调用 RunServer 阻塞运行） |
 | `tests/test_logger.cpp` | M10 | Logger 单元测试（8 个测试用例：级别过滤、空消息、长消息） |
 | `tests/test_timer.cpp` | M10 | Timer 单元测试（12 个测试用例：启停、计时精度、重置） |
@@ -118,11 +122,12 @@ Inference-Service/
 # 增量编译（保留 build 缓存，速度更快）
 ./rebuild.sh
 
-# 手动编译
+# 手动编译（注意：需在项目根目录下运行，确保 models/ 相对路径正确）
 mkdir build && cd build
 cmake ..
 make
-./inference_service
+cd ..
+./build/inference_service
 ```
 
 ## 未完成任务清单
@@ -161,6 +166,17 @@ make
 | OnnxBackend Predict 拷贝输入数据 | CreateTensor 要求非 const 指针，需额外拷贝 | 改用 Ort::Value::CreateTensor 分配器模式，避免用户数据拷贝 |
 | NMS 算法 O(n²) 复杂度 | 检测框数量多时后处理耗时较长 | 改用 Soft-NMS（降低重叠框置信度而非直接剔除）或分区索引（按类别/空间区域分组后分别 NMS） |
 | ProcessYoloOutput 硬编码 85 元素 | 仅支持 YOLOv5/v8 的 80 类输出，其他变体（如 4 类、20 类）不兼容 | 将 kBoxElementCount 和 kClassCount 改为函数参数，支持不同 YOLO 变体 |
+| M10 单元测试 GTest ABI 不兼容 | anaconda3 的 GTest 1.11.0 与 arm64 编译器 ABI 不匹配，链接失败 | CMake 配置 `-DGTest_ROOT=/opt/homebrew -DGTest_DIR=/opt/homebrew/lib/cmake/GTest` 强制使用 Homebrew GTest 1.17.0 |
+
+## 已修复问题
+
+| 问题 | 修复方式 | 验证结果 |
+|------|----------|----------|
+| ONNX float16 输入类型不匹配 | 使用 YOLOv5 export.py 重新导出 float32 ONNX 模型 | ✅ bus.jpg 检测到 5 目标，zidane.jpg 检测到 4 目标 |
+| LLM KV Cache 未清空导致第二次调用失败 | 在 Generate/GenerateStream 开头添加 `llama_memory_clear(llama_get_memory(ctx), true)` | ✅ 连续多次调用均正常，无 inconsistent sequence positions 错误 |
+| LLM 缺少 Chat Template 导致重复生成或直接 EOS | 在 Generate/GenerateStream 中调用 `llama_chat_apply_template` 包装 prompt 为对话格式 | ✅ 模型正确回答问题（2+2=4, Paris, Shakespeare），不再重复 prompt |
+| 构建脚本工作目录导致模型路径找不到 | build.sh/rebuild.sh 运行前 `cd ..` 回项目根目录 | ✅ 服务启动时 ONNX 和 LLM 模型均正常加载 |
+| /detect 不支持图片路径输入 | 新增 JSON `image_path` 字段支持，优先 multipart 文件上传 | ✅ 两种输入方式均正常工作 |
 
 ## 下一步行动建议
 

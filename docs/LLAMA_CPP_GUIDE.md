@@ -18,7 +18,9 @@
 8. [推理（Decode）](#8-推理decode)
 9. [采样器链（Sampler Chain）](#9-采样器链sampler-chain)
 10. [Token 转文本](#10-token-转文本)
-11. [完整推理流程代码走读](#11-完整推理流程代码走读)
+11. [Chat Template（对话模板）](#11-chat-template对话模板)
+12. [KV Cache 清空](#12-kv-cache-清空)
+13. [完整推理流程代码走读](#13-完整推理流程代码走读)
 
 ---
 
@@ -41,7 +43,8 @@ LlamaGenerator (公共接口)
         ├── llama_model*      — 模型对象
         ├── llama_context*    — 推理上下文
         ├── const llama_vocab* — 词表指针
-        └── BuildSamplerChain() — 构建采样器链
+        ├── BuildSamplerChain() — 构建采样器链
+        └── ApplyChatTemplate() — 应用对话模板包装 prompt
 ```
 
 ### 1.3 API 版本说明
@@ -962,14 +965,185 @@ static std::string TokenToText(const llama_vocab* vocab, llama_token token) {
 
 ---
 
-## 11. 完整推理流程代码走读
+## 11. Chat Template（对话模板）
+
+### 11.1 为什么需要 Chat Template
+
+Chat 模型（如 TinyLlama-Chat、Qwen-Chat）在训练时使用了特定的对话格式，例如：
+
+```
+<s>  user
+What is 2+2?</s>  assistant
+4</s>
+```
+
+如果直接将裸文本 `What is 2+2?` 送入模型，模型会将其视为文档续写任务而非对话，导致：
+- **重复 prompt**：模型续写更多类似的问题而非回答
+- **直接 EOS**：模型不理解如何回答，直接输出结束标记
+
+### 11.2 llama_chat_apply_template
+
+```c
+int32_t llama_chat_apply_template(
+    const char * tmpl,
+    const struct llama_chat_message * chat,
+    size_t n_msg,
+    bool add_ass,
+    char * buf,
+    int32_t length
+);
+```
+
+**功能**：将对话消息列表格式化为模型期望的文本字符串。
+
+**参数**：
+- `tmpl`：模板名称（`NULL` 时自动从模型元数据读取 `chat_template`）
+- `chat`：`llama_chat_message` 数组，每条消息包含 role 和 content
+- `n_msg`：消息数量
+- `add_ass`：是否在末尾添加 assistant 前缀（通常为 `true`）
+- `buf`：输出缓冲区（`NULL` 时返回所需长度）
+- `length`：缓冲区大小
+
+**返回值**：
+- 成功：写入的字节数（≥ 0）
+- 缓冲区不足：所需的负值
+
+**llama_chat_message 结构体**：
+
+```c
+struct llama_chat_message {
+    const char * role;     // "system" / "user" / "assistant"
+    const char * content;  // 消息文本
+};
+```
+
+### 11.3 在项目中的使用
+
+```cpp
+// src/llm/llm_generator.cpp Impl::ApplyChatTemplate
+std::string ApplyChatTemplate(const std::string& prompt) const {
+    if (!model) {
+        return prompt;
+    }
+
+    llama_chat_message msg;
+    msg.role = "user";
+    msg.content = prompt.c_str();
+
+    // 第一次调用：传入空缓冲区，获取所需长度
+    int32_t len = llama_chat_apply_template(
+        nullptr, &msg, 1, true, nullptr, 0);
+    if (len <= 0) {
+        Logger::Warning("Impl::ApplyChatTemplate: template not available, using raw prompt");
+        return prompt;
+    }
+
+    // 第二次调用：传入足够大的缓冲区，获取实际内容
+    std::vector<char> buf(static_cast<size_t>(len) + 1);
+    len = llama_chat_apply_template(
+        nullptr, &msg, 1, true, buf.data(), static_cast<int32_t>(buf.size()));
+    if (len <= 0) {
+        Logger::Warning("Impl::ApplyChatTemplate: template application failed, using raw prompt");
+        return prompt;
+    }
+
+    return std::string(buf.data(), static_cast<size_t>(len));
+}
+```
+
+### 11.4 调用时机
+
+在 `Generate` 和 `GenerateStream` 中，**分词之前**调用 `ApplyChatTemplate`：
+
+```cpp
+// 应用对话模板，将 prompt 包装为模型期望的对话格式
+std::string formatted = pImpl_->ApplyChatTemplate(prompt);
+
+// 分词：将模板包装后的文本转为 token ids
+int32_t n_tokens = llama_tokenize(
+    pImpl_->vocab, formatted.c_str(), static_cast<int32_t>(formatted.size()),
+    tokens.data(), n_tokens_max, true, false);
+```
+
+### 11.5 模板回退机制
+
+- 如果模型元数据包含 `chat_template`：自动使用模型专属模板
+- 如果 `llama_chat_apply_template` 返回 ≤0（模板不可用或应用失败）：回退为原始 prompt，记录 Warning 日志
+- `tmpl = nullptr` 时，llama.cpp 内部自动查找模型的 `tokenizer.chat_template` 元数据
+
+### 11.6 不同模型的模板输出示例
+
+| 模型 | 输入 prompt | formatted 输出 |
+|------|------------|----------------|
+| TinyLlama-Chat | `"What is 2+2?"` | `"<s>  user\nWhat is 2+2?</s>  assistant\n"` |
+| Qwen2-Chat | `"你好"` | `"<\|im_start\|>user\n你好<\|im_end\|>\n<\|im_start\|>assistant\n"` |
+
+---
+
+## 12. KV Cache 清空
+
+### 12.1 为什么需要清空 KV Cache
+
+llama.cpp 使用 KV Cache 存储已推理 token 的 Key/Value 状态，避免重复计算。但在**多次独立调用 Generate** 时，上一次调用的 KV Cache 残留会导致问题：
+
+- 新 prompt 从 `pos=0` 开始，但 Cache 中有旧数据 → `llama_decode` 报 **"inconsistent sequence positions"** 错误
+- 旧 Cache 会导致模型输出混乱（将新 prompt 视为旧对话的延续）
+
+### 12.2 llama_memory_clear
+
+```c
+void llama_memory_clear(
+    struct llama_memory * mem,
+    bool data
+);
+```
+
+**功能**：清空 KV Cache 中的序列数据。
+
+**参数**：
+- `mem`：内存对象，通过 `llama_get_memory(ctx)` 获取
+- `data`：`true` 清空所有序列数据，`false` 仅清空元数据
+
+**在项目中的使用**（`src/llm/llm_generator.cpp`）：
+
+```cpp
+// Generate 和 GenerateStream 开头
+llama_memory_clear(llama_get_memory(pImpl_->ctx), true);
+```
+
+### 12.3 API 版本说明
+
+| 旧 API（已废弃） | 新 API（本项目使用） | 说明 |
+|---|---|---|
+| `llama_kv_cache_clear(ctx)` | `llama_memory_clear(llama_get_memory(ctx), true)` | llama.cpp 9620 将 KV Cache 管理重构为 memory 对象 |
+| - | `llama_get_memory(ctx)` | 获取 context 关联的 memory 对象，返回 `llama_memory_t` |
+
+### 12.4 调用时机
+
+在 `Generate` 和 `GenerateStream` 的**最开头**（前置检查之后、分词之前）调用，确保每次生成从干净状态开始：
+
+```cpp
+std::string LlamaGenerator::Generate(...) {
+    if (!pImpl_->model_loaded) { return ""; }
+    if (prompt.empty()) { return ""; }
+
+    // 清空 KV Cache，确保每次调用从干净状态开始
+    llama_memory_clear(llama_get_memory(pImpl_->ctx), true);
+
+    // 分词 + 推理...
+}
+```
+
+---
+
+## 13. 完整推理流程代码走读
 
 本节将 M7 的 `Generate` 方法按步骤拆解，展示完整的 llama.cpp 推理流程。
 
-### 11.1 步骤 1：前置检查
+### 13.1 步骤 1：前置检查
 
 ```cpp
-// src/llm/llm_generator.cpp:208-216
+// src/llm/llm_generator.cpp
 if (!pImpl_->model_loaded) {
     Logger::Error("LlamaGenerator::Generate: model not loaded");
     return "";
@@ -982,14 +1156,29 @@ if (prompt.empty()) {
 
 确保模型已加载且 prompt 非空。
 
-### 11.2 步骤 2：分词
+### 13.2 步骤 2：清空 KV Cache
 
 ```cpp
-// src/llm/llm_generator.cpp:222-231
+llama_memory_clear(llama_get_memory(pImpl_->ctx), true);
+```
+
+清空上一次生成残留的 KV Cache，避免 `inconsistent sequence positions` 错误。详见 [第 12 节](#12-kv-cache-清空)。
+
+### 13.3 步骤 3：应用 Chat Template
+
+```cpp
+std::string formatted = pImpl_->ApplyChatTemplate(prompt);
+```
+
+将 prompt 包装为模型期望的对话格式（如 `<s>  user\n...message...</s>  assistant\n`），确保模型以"回答"模式而非"续写"模式生成。详见 [第 11 节](#11-chat-template对话模板)。
+
+### 13.4 步骤 4：分词
+
+```cpp
 int32_t n_tokens_max = static_cast<int32_t>(llama_n_ctx(pImpl_->ctx));
 std::vector<llama_token> tokens(static_cast<size_t>(n_tokens_max));
 int32_t n_tokens = llama_tokenize(
-    pImpl_->vocab, prompt.c_str(), static_cast<int32_t>(prompt.size()),
+    pImpl_->vocab, formatted.c_str(), static_cast<int32_t>(formatted.size()),
     tokens.data(), n_tokens_max, true, false);
 if (n_tokens < 0) {
     Logger::Error("LlamaGenerator::Generate: tokenization failed, prompt too long");
@@ -998,28 +1187,26 @@ if (n_tokens < 0) {
 tokens.resize(static_cast<size_t>(n_tokens));
 ```
 
-将 prompt 字符串转为 token id 数组。`add_bos=true` 自动添加 BOS token。
+将 Chat Template 包装后的文本转为 token id 数组。`add_bos=true` 自动添加 BOS token。
 
-### 11.3 步骤 3：构建采样器链
+### 13.5 步骤 5：构建采样器链
 
 ```cpp
-// src/llm/llm_generator.cpp:234
 llama_sampler* sampler = pImpl_->BuildSamplerChain(config);
 ```
 
 根据 `GenerationConfig` 构建采样器链：penalties → top-k(40) → top-p(0.95) → temp(0.8) → dist。
 
-### 11.4 步骤 4：初始化 Batch
+### 13.6 步骤 6：初始化 Batch
 
 ```cpp
-// src/llm/llm_generator.cpp:237-238
 int32_t max_batch = std::max(n_tokens, 1);
 llama_batch batch = llama_batch_init(max_batch, 0, 1);
 ```
 
 分配足以容纳所有 prompt tokens 的 batch。
 
-### 11.5 步骤 5：填充 Prompt Batch 并 Decode
+### 13.7 步骤 7：填充 Prompt Batch 并 Decode
 
 ```cpp
 // src/llm/llm_generator.cpp:241-261
@@ -1044,7 +1231,7 @@ if (ret != 0) {
 
 将 prompt 所有 token 一次性送入模型。注意只有最后一个 token 需要 logits。
 
-### 11.6 步骤 6：循环生成
+### 13.8 步骤 8：循环生成
 
 ```cpp
 // src/llm/llm_generator.cpp:264-301
@@ -1093,7 +1280,7 @@ for (int i = 0; i < config.max_tokens; ++i) {
 4. **Decode**：将新 token 送入模型，为下一次采样准备 logits
 5. **上下文溢出检查**：超过 `n_ctx` 时停止
 
-### 11.7 步骤 7：资源释放
+### 13.9 步骤 9：资源释放
 
 ```cpp
 // src/llm/llm_generator.cpp:303-304
@@ -1103,7 +1290,7 @@ llama_batch_free(batch);
 
 释放采样器链和 batch 内存。
 
-### 11.8 流式 vs 非流式
+### 13.10 流式 vs 非流式
 
 `GenerateStream` 与 `Generate` 的逻辑完全相同，唯一区别在于 token 处理方式：
 
@@ -1113,7 +1300,7 @@ llama_batch_free(batch);
 | 返回值 | 拼接的完整字符串 | void（通过 callback 逐步输出） |
 | 适用场景 | 批量处理、不需要实时输出 | 聊天交互、实时显示 |
 
-### 11.9 资源生命周期图
+### 13.11 资源生命周期图
 
 ```
 LlamaGenerator::LoadModel()
@@ -1125,7 +1312,9 @@ LlamaGenerator::LoadModel()
 │
 LlamaGenerator::Generate() / GenerateStream()
 │
-├── llama_tokenize()                         ← 分词（依赖 vocab）
+├── llama_memory_clear(llama_get_memory(ctx), true)  ← 清空 KV Cache
+├── ApplyChatTemplate(prompt)                         ← 包装对话模板
+├── llama_tokenize(formatted)                         ← 分词（依赖 vocab，输入为模板包装后的文本）
 ├── BuildSamplerChain()                      ← 创建 sampler
 │   ├── llama_sampler_chain_init()
 │   ├── llama_sampler_init_penalties()

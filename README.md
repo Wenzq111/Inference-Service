@@ -117,10 +117,20 @@ curl http://localhost:8080/health
 
 ### 目标检测
 
-上传图像进行 YOLO 目标检测：
+上传图像进行 YOLO 目标检测，支持两种输入方式：
+
+**方式一：multipart 文件上传**
 
 ```bash
 curl -X POST -F "image=@test.jpg" http://localhost:8080/detect
+```
+
+**方式二：JSON 指定图片路径**
+
+```bash
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"image_path":"models/test.jpg"}' \
+  http://localhost:8080/detect
 ```
 
 可选查询参数（`confidence` 和 `nms_threshold`）：
